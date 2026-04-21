@@ -288,10 +288,10 @@ async def run_cctv_ai():
     try:
         shared_data.set_LIFE('active')
         rtsp_urls = [
-            "images/video_test/cam1.mp4",
-            "images/video_test/cam2.mp4",
-            "images/video_test/cam3.mp4",
-            "images/video_test/cam4.mp4"
+            "images/video_test/D01_20260326154700.mp4",
+            "images/video_test/D02_20260326154700.mp4",
+            "images/video_test/D03_20260326154702.mp4",
+            "images/video_test/D04_20260326154710.mp4"
         ]
         cctv_ai = CCTV_AI(rtsp_urls, shared_data)
         await cctv_ai.run()

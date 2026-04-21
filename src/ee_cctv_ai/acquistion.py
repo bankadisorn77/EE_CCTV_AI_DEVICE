@@ -67,30 +67,30 @@ class Acquisition:
             self.cap = None
 
     def _reconnect(self):
-        self.on_stream_end()
-        # RETRY_DELAY = 10
-        # MAX_RETRY = 50
-        # self._reconnect_count = getattr(self, '_reconnect_count', 0) + 1
+        # self.on_stream_end()
+        RETRY_DELAY = 10
+        MAX_RETRY = 50
+        self._reconnect_count = getattr(self, '_reconnect_count', 0) + 1
         
-        # print(f"[{self.name}] Attempting reconnect to {self.url} ({self._reconnect_count}/{MAX_RETRY})")
+        print(f"[{self.name}] Attempting reconnect to {self.url} ({self._reconnect_count}/{MAX_RETRY})")
         
-        # if self._reconnect_count > MAX_RETRY:
-        #     print(f"[{self.name}] Max retry exceeded, triggering cleanup...")
-        #     self.stop_process = True
-        #     if self.on_stream_end:
-        #         self.on_stream_end()
-        #     return
+        if self._reconnect_count > MAX_RETRY:
+            print(f"[{self.name}] Max retry exceeded, triggering cleanup...")
+            self.stop_process = True
+            if self.on_stream_end:
+                self.on_stream_end()
+            return
         
-        # time.sleep(RETRY_DELAY)
-        # try:
-        #     cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-        #     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        #     if cap.isOpened():
-        #         self.cap = cap
-        #         self._reconnect_count = 0  # ← reset เมื่อต่อได้
-        #         print(f"[{self.name}] Reconnected successfully")
-        #     else:
-        #         cap.release()
-        #         print(f"[{self.name}] Reconnect failed, will retry...")
-        # except Exception as e:
-        #     print(f"[{self.name}] Reconnect error: {e}")  
+        time.sleep(RETRY_DELAY)
+        try:
+            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if cap.isOpened():
+                self.cap = cap
+                self._reconnect_count = 0  
+                print(f"[{self.name}] Reconnected successfully")
+            else:
+                cap.release()
+                print(f"[{self.name}] Reconnect failed, will retry...")
+        except Exception as e:
+            print(f"[{self.name}] Reconnect error: {e}")  

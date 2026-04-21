@@ -1,0 +1,42 @@
+[
+    {
+        "name": "cam1",
+        "machineCount": 3,
+        "roi": {
+            "col1": 472,
+            "row1": 282,
+            "col2": 1848,
+            "row2": 1078
+        }
+    },
+    {
+        "name": "cam2",
+        "machineCount": 4,
+        "roi": {
+            "col1": 168,
+            "row1": 328,
+            "col2": 1788,
+            "row2": 1074
+        }
+    },
+    {
+        "name": "cam3",
+        "machineCount": 3,
+        "roi": {
+            "col1": 238,
+            "row1": 260,
+            "col2": 1356,
+            "row2": 842
+        }
+    },
+    {
+        "name": "cam4",
+        "machineCount": 4,
+        "roi": {
+            "col1": 460,
+            "row1": 270,
+            "col2": 1834,
+            "row2": 892
+        }
+    }
+]

@@ -1,0 +1,37 @@
+name: "model"
+platform: "tensorrt_plan"
+max_batch_size: 4
+
+input [
+    {
+        name: "images"
+        data_type: TYPE_FP16
+        dims: [3, 640, 640 ]
+    }
+]
+output [
+    {
+        name: "output0"
+        data_type: TYPE_FP32
+        dims: [300,6]
+    }
+]
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 2
+  }
+]
+dynamic_batching {
+  preferred_batch_size: [ 4 ]
+  max_queue_delay_microseconds: 30000
+}
+
+optimization {
+  execution_accelerators {
+    gpu_execution_accelerator : [ {
+      name : "tensorrt"
+      parameters { key: "precision_mode" value: "FP16" }
+    } ]
+  }
+}

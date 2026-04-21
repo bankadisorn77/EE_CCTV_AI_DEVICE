@@ -1,0 +1,35 @@
+python -m venv env
+
+
+yolo_gpu_env\Scripts\activate
+
+env\Scripts\activate
+
+
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+
+
+pip install opencv-python opencv-contrib-python
+
+
+pip install ultralytics
+
+yolo checks
+
+
+
+
+sudo podman run --rm -it   --runtime nvidia   --privileged   --shm-size=1g   --name triton_cctv_ai   -p 8000:8000 -p 8001:8001 -p 8002:8002   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=all   -v /home/orin_nano/@OtherProject/EE_CCTV_AI-V2/Triton/model_repository:/models   tritonserver   tritonserver --model-repository=/models
+
+/usr/src/tensorrt/bin/trtexec \
+  --onnx=/models/model/1/      model.onnx \
+  --saveEngine=/models/Yolov7_model/1/model.plan \
+  --fp16 \
+  --minShapes=images:1x3x640x640 \
+  --optShapes=images:4x3x640x640 \
+  --maxShapes=images:4x3x640x640 \
+  --memPoolSize=workspace:1024 \
+  --verbose

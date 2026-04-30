@@ -14,22 +14,31 @@ python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_
 
 pip install opencv-python opencv-contrib-python
 
-
+pip install PyNvJpeg
 pip install ultralytics
+sudo apt-get install libturbojpeg
+pip install PyTurboJPEG
+pip install tritonclient[grpc]
+pip install numpy == 1.26.4
+pip install PyTurboJPEG==1.7.5
 
 yolo checks
 
 
 
 
-sudo podman run --rm -it   --runtime nvidia   --privileged   --shm-size=1g   --name triton_cctv_ai   -p 8000:8000 -p 8001:8001 -p 8002:8002   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=all   -v /home/orin_nano/@OtherProject/EE_CCTV_AI-V2/Triton/model_repository:/models   tritonserver   tritonserver --model-repository=/models
 
-/usr/src/tensorrt/bin/trtexec \
-  --onnx=/models/model/1/      model.onnx \
-  --saveEngine=/models/Yolov7_model/1/model.plan \
+sudo podman run --rm -it   --runtime nvidia   --privileged   --ipc=host   -v /dev/shm:/dev/shm   --name triton_cctv_ai   --net=host   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=all   -v /home/orin_nano/@OtherProject/EE_CCTV_AI-V2/Triton/model_repository:/models   tritonserver   tritonserver --model-repository=/models
+
+sudo ufw disable
+
+  /usr/src/tensorrt/bin/trtexec \
+  --onnx=/models/model/2/model.onnx \
+  --saveEngine=/models/model/2/model.plan \
   --fp16 \
   --minShapes=images:1x3x640x640 \
-  --optShapes=images:4x3x640x640 \
-  --maxShapes=images:4x3x640x640 \
+  --optShapes=images:1x3x640x640 \
+  --maxShapes=images:1x3x640x640 \
+  --builderOptimizationLevel=5 \
   --memPoolSize=workspace:1024 \
   --verbose

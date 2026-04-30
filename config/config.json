@@ -8,8 +8,6 @@
     "triton_url":"localhost:8001",
     "webserver_url":"localhost",
     "webserver_port":8000,
-    "zmq_url":"localhost",
-    "zmq_port":5555,
     "ip":"127.0.0.1",
     "mac":"00:00:00:00:00:00",
     "apiKey":"your_api_key_here"

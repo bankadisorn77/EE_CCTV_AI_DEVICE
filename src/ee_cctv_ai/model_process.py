@@ -1,19 +1,34 @@
-from matplotlib import image
 import numpy as np
 import cv2
 from tritonclient.grpc import aio as grpc
-
+import tritonclient.utils.shared_memory as shm
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 MODEL_NAME = 'model' 
 
+cpu_executor = ThreadPoolExecutor(max_workers=4)
+shm_regions = {}
 
- 
-async def predict_model(img, triton_client,config_cam, size=640, conf=0.5):
-    numpy_image,croped_shape =  preprocess(img,config_cam)
-    results = await prediction(numpy_image,triton_client)
+async def predict_model(img, triton_client, config_cam, size=640, conf=0.5):
+    numpy_image, croped_shape = await preprocess(img, config_cam, size)
+    
+    cam_name = config_cam['name'] if config_cam and 'name' in config_cam else "default_cam"
+    
+    results = await prediction(numpy_image, triton_client, cam_name)
+    
     if results is None:
-        return img, []
-    img,detection_class =   process_image(results, img,croped_shape,config_cam ,size, conf) 
-    return img,detection_class
+        return img, {"detection": [], "machineCount": config_cam.get("machineCount", 0) if config_cam else 0}
+        
+    loop = asyncio.get_event_loop()
+    img, payload = await loop.run_in_executor(
+        cpu_executor, 
+        process_image, 
+        results, img, croped_shape, config_cam, size, conf
+    )
+             
+    return img, payload
+
 
 def process_image(results, img, croped_shape, config_cam, size=640, conf=0.5):
     col1, row1 = 0, 0
@@ -26,125 +41,104 @@ def process_image(results, img, croped_shape, config_cam, size=640, conf=0.5):
     valid_detections = results[results[:, 4] >= conf]
     detection_class = []
     for detection in valid_detections:
-            x1, y1, x2, y2 = detection[0:4]
-            conf_score = float(detection[4])
-            cls_id = int(detection[5])
-            h_orig, w_orig = img.shape[:2]
-            if croped_shape is not None:
-                h_crop, w_crop = croped_shape
-                x1 = int(x1 * w_crop / size) + col1
-                y1 = int(y1 * h_crop / size) + row1
-                x2 = int(x2 * w_crop / size) + col1
-                y2 = int(y2 * h_crop / size) + row1
-            else:
-                x1 = int(x1 * w_orig / size)
-                y1 = int(y1 * h_orig / size)
-                x2 = int(x2 * w_orig / size)
-                y2 = int(y2 * h_orig / size)
+        x1, y1, x2, y2 = detection[0:4]
+        conf_score = float(detection[4])
+        cls_id = int(detection[5])
+        h_orig, w_orig = img.shape[:2]
+            
+        if croped_shape is not None:
+            h_crop, w_crop = croped_shape
+            x1 = int(x1 * w_crop / size) + col1
+            y1 = int(y1 * h_crop / size) + row1
+            x2 = int(x2 * w_crop / size) + col1
+            y2 = int(y2 * h_crop / size) + row1
+        else:
+            x1 = int(x1 * w_orig / size)
+            y1 = int(y1 * h_orig / size)
+            x2 = int(x2 * w_orig / size)
+            y2 = int(y2 * h_orig / size)
 
-            if cls_id == 1:
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            else:
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            detection_class.append({
-                "class": cls_id,
-                "conf": round(conf_score, 2),
-            })
-    
+        if cls_id == 1:
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        else:
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+        detection_class.append({
+            "class": cls_id,
+            "conf": round(conf_score, 2),
+        })
+       
+    cv2.imwrite(f"debug_box_{config_cam['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg", img)  
     result = {
         "detection": detection_class,
         "machineCount": count if count is not None else 0,
     }
-
-
     return img, result
 
-
-
-
-async def prediction(numpy_img,triton_client):
-    triton = triton_client
-    inputs = [
-        grpc.InferInput("images", numpy_img.shape,"FP16")
-    ]
-        # Set the data for the input tensor
-    inputs[0].set_data_from_numpy(numpy_img)
-
-    outputs=[
-        grpc.InferRequestedOutput("output0")
-    ]
-
-    results =  await triton.infer(
-        model_name=MODEL_NAME,
-        inputs=inputs,
-        outputs=outputs
-    )
-    result = results.as_numpy("output0")[0]
-    # print(f"Shape: {result.shape}")
-    # print(f"Max conf: {result[:, 4].max():.4f}")
-    # print(f"Min conf: {result[:, 4].min():.4f}")
-    # print(f"Sample row: {result[0]}")
-    return result
-
-
-def preprocess(image,config_cam):
-    img = image
+def cv2_preprocess(img, config_cam, size):
     croped_shape = None
-    if config_cam is not None:
-        if config_cam["roi"] is not None:
-            img = crop_function(img, config_cam)
+    if config_cam is not None and config_cam["roi"] is not None:
+        try:
+            roi = config_cam["roi"]
+            img = img[roi["row1"]:roi["row2"], roi["col1"]:roi["col2"]]
             croped_shape = img.shape[:2]
-            
-    else:
-        img = image
-    # img = cv2.bilateralFilter(img, 5, 75, 75)
-    img = cv2.dnn.blobFromImage(img, scalefactor=1/255.0, size=(640, 640), swapRB=True, crop=False)
-    img = img.astype(np.float16)
-    return img,croped_shape
+            cv2.imwrite(f"debug_pre_{config_cam['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg", img) 
+        except Exception as e:
+            print(f"Error in cropping image: {e}")
+    img = cv2.resize(img, (size, size), interpolation=cv2.INTER_NEAREST)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) 
+    img = np.ascontiguousarray(
+        img.transpose(2, 0, 1)[np.newaxis], 
+        dtype=np.float16
+    ) 
+    return img, croped_shape
 
-def crop_function(img,cam_data):
+async def preprocess(image, config_cam, size):
+    loop = asyncio.get_event_loop()
+    img, croped_shape = await loop.run_in_executor(
+        cpu_executor, 
+        cv2_preprocess, 
+        image, config_cam, size
+    )
+    return img, croped_shape
+
+async def prediction(numpy_img, triton_client, cam_name):
+    input_byte_size = numpy_img.nbytes
+    
+    task_id = id(asyncio.current_task())
+    shm_name = f"shm_{task_id}"
+    
+    if shm_name not in shm_regions or shm_regions[shm_name]["size"] != input_byte_size:
+        try:
+            await triton_client.unregister_system_shared_memory(shm_name)
+        except Exception:
+            pass
+        
+        import os
+        shm_file_path = f"/dev/shm/{shm_name}"
+        if os.path.exists(shm_file_path):
+            try:
+                os.remove(shm_file_path)
+            except Exception:
+                pass
+
+        shm_handle = shm.create_shared_memory_region(shm_name, "/" + shm_name, input_byte_size)
+        await triton_client.register_system_shared_memory(shm_name, "/" + shm_name, input_byte_size)
+        shm_regions[shm_name] = {"handle": shm_handle, "name": shm_name, "size": input_byte_size}
+
+    shm.set_shared_memory_region(shm_regions[shm_name]["handle"], [numpy_img])
+
+    inputs = [grpc.InferInput("images", numpy_img.shape, "FP16")]
+    inputs[0].set_shared_memory(shm_name, input_byte_size)
+    outputs = [grpc.InferRequestedOutput("output0")]
+
     try:
-        roi = cam_data["roi"]
-        cropped_img = img[roi["row1"]:roi["row2"], roi["col1"]:roi["col2"]]
-        return cropped_img
+        results = await triton_client.infer(
+            model_name=MODEL_NAME,
+            inputs=inputs,
+            outputs=outputs
+        )
+        return results.as_numpy("output0")[0]
     except Exception as e:
-        print(f"Error in cropping image: {e}")
-        return img
-
-
-
-
-
-
-
-
-
- # if len(valid_detections) == 0:
-    #     return img, detection_class
-
-    # if 1 in valid_detections[:, 5]:
-    #     for detection in valid_detections:
-    #         if int(detection[5]) != 1:
-    #             continue
-    #         x1, y1, x2, y2 = detection[0:4]
-    #         conf_score = float(detection[4])
-    #         cls_id = int(detection[5])
-    #         h_orig, w_orig = img.shape[:2]
-    #         print(f"Detection: Class={cls_id}, Confidence={conf_score:.2f}, Box=({x1:.2f}, {y1:.2f}, {x2:.2f}, {y2:.2f})")
-    #         if croped_shape is not None:
-    #             h_crop, w_crop = croped_shape
-    #             x1 = int(x1 * w_crop / size) + col1
-    #             y1 = int(y1 * h_crop / size) + row1
-    #             x2 = int(x2 * w_crop / size) + col1
-    #             y2 = int(y2 * h_crop / size) + row1
-    #         else:
-    #             x1 = int(x1 * w_orig / size)
-    #             y1 = int(y1 * h_orig / size)
-    #             x2 = int(x2 * w_orig / size)
-    #             y2 = int(y2 * h_orig / size)
-
-    #         cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-    #         detection_class.append({
-    #             "class": cls_id,
-    #             "conf": round(conf_score, 2)
-    #         })
+        print(f"Triton Inference Error on {cam_name}: {e}")
+        return None

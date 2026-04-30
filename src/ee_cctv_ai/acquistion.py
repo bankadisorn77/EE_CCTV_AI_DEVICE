@@ -1,7 +1,7 @@
 import threading
 import cv2
 import time
-
+import os
 
 class Acquisition:
     def __init__(self, url, key="cam1",on_stream_end=None):
@@ -26,8 +26,41 @@ class Acquisition:
     def initial(self):
         if self.cap is not None:
             return
-        self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        target_size = 640 
+
+        if isinstance(self.url, str) and self.url.startswith('rtsp://'):
+            pipeline = (
+                f"rtspsrc location={self.url} latency=0 ! "
+                f"rtph264depay ! h264parse ! nvv4l2decoder ! "
+                f"nvvidconv ! video/x-raw, format=BGRx ! "  
+                f"videoconvert ! video/x-raw, format=BGR ! "
+                f"appsink drop=true sync=false max-buffers=1"    
+            )
+            # print(f"[{self.name}] Connecting to RTSP via GStreamer NVDEC + VIC...")
+            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            
+        elif isinstance(self.url, str) and self.url.endswith('.mp4'):
+            abs_path = os.path.abspath(self.url)
+    
+            if not os.path.exists(abs_path):
+                print(f"[{self.name}] ERROR: File NOT FOUND at: {abs_path}")
+            else:
+                print(f"[{self.name}] File exists at: {abs_path}")
+
+            pipeline = (
+                f"filesrc location={abs_path} ! "
+                f"qtdemux ! h264parse ! nvv4l2decoder ! "
+                f"nvvidconv ! video/x-raw, format=BGRx ! "
+                f"videoconvert ! video/x-raw, format=BGR ! "
+                f"appsink drop=true sync=false max-buffers=1"
+            )
+            
+            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        else:
+            self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         if not self.cap.isOpened():
             self.cap = None
             raise Exception("Failed to open video stream from " + self.url)
@@ -43,6 +76,8 @@ class Acquisition:
             self.t.join(timeout=2.0)
 
     def _update(self):
+        TARGET_FPS = 30
+        interval = 1.0 / TARGET_FPS
         while not self.stop_process:
             if self.cap is None:
                 self._reconnect()
@@ -57,7 +92,7 @@ class Acquisition:
 
             with self._lock:
                 self._image = frame
-            time.sleep(0.01)
+            time.sleep(interval)
 
         if self.cap is not None:
             try:
@@ -83,14 +118,9 @@ class Acquisition:
         
         time.sleep(RETRY_DELAY)
         try:
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if cap.isOpened():
-                self.cap = cap
-                self._reconnect_count = 0  
+            self.initial()  
+            if self.cap and self.cap.isOpened():
+                self._reconnect_count = 0
                 print(f"[{self.name}] Reconnected successfully")
-            else:
-                cap.release()
-                print(f"[{self.name}] Reconnect failed, will retry...")
         except Exception as e:
-            print(f"[{self.name}] Reconnect error: {e}")  
+            print(f"[{self.name}] Reconnect error: {e}") 

@@ -1,8 +1,8 @@
 class Data():
     def __init__(self):
-        self.config = [] # เปลี่ยนจาก None เป็น List เปล่าเพื่อกัน Error
+        self.config = [] 
         self.confidence_threshold = 0.5
-        self.LIFE = 'inactive'
+        self.LIFE = 'active'
         self.activeDevice = 0
 
     # setters
@@ -22,7 +22,6 @@ class Data():
         if not self.config:
             return None
         return next((item for item in self.config if item.get("name") == cam_name), None)
-
     def get_confidence_threshold(self):
         return self.confidence_threshold
     def get_LIFE(self):

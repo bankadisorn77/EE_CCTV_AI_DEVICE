@@ -42,3 +42,5 @@ sudo ufw disable
   --builderOptimizationLevel=5 \
   --memPoolSize=workspace:1024 \
   --verbose
+
+  /usr/src/tensorrt/bin/trtexec --onnx=/models/model/1/model.onnx --saveEngine=/models/model/1/model.plan --fp16 --memPoolSize=workspace:2048 --verbose --builderOptimizationLevel=5 

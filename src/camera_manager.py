@@ -22,7 +22,7 @@ class CCTV_AI:
 
         self.miss_counter   = {f"cam{i+1}": 0 for i in range(len(rtsp_urls))}
         self.alarm_cooldown = {f"cam{i+1}": 0 for i in range(len(rtsp_urls))}
-        self.MISS_THRESHOLD = 5
+        self.MISS_THRESHOLD = 25
         self.COOLDOWN_SEC   = 5
         self.start_time     = None
 
@@ -62,7 +62,6 @@ class CCTV_AI:
         except Exception as e:
             print(f"Config error (confident): {e}")
 
-    # camera_manager.py — producer ลด polling
     async def producer(self, cam_idx):
             camera = self.cameras[cam_idx]
             camera.start()
@@ -73,14 +72,14 @@ class CCTV_AI:
             while not self.stop_process:
                 frame = camera.image
                 if frame is not None:
-                    self.update_capture_fps(camera.name)
+                    # self.update_capture_fps(camera.name)
                     if queue.full():
                         try:
                             queue.get_nowait()
                             queue.task_done()
                         except asyncio.QueueEmpty:
                             pass
-                    await queue.put({"frame": frame, "cam_key": camera.name})
+                    await queue.put({"frame": frame.copy(), "cam_key": camera.name})
                 await asyncio.sleep(interval)
 
     async def worker(self, cam_id, triton_client):
@@ -94,18 +93,17 @@ class CCTV_AI:
                 cam_key = item["cam_key"]
                 cam_config = self.shared_data.get_config_by_cam(cam_key)
                 confidence = self.shared_data.get_confidence_threshold()
-
-              
                 processed_img, detection_results = await model_process.predict_model(
-                    frame, triton_client, cam_config, size=640, conf=confidence
+                    frame.copy(), triton_client, cam_config, size=640, conf=confidence
                 )
                 
-                self.update_process_fps(cam_key)
+                # self.update_process_fps(cam_key)
                 if processed_img is not None:
                     await self.logic(processed_img, cam_key, detection_results)
 
             except Exception as e:
                 print(f"Worker Error on {cam_id}: {e}")
+                self.shared_data.set_LIFE('error')
                 await asyncio.sleep(0.1)
             finally:
                 queue.task_done()
@@ -176,9 +174,8 @@ class CCTV_AI:
                     print(f"Alarm failed: {res.status_code} - {res.text}")
             except Exception as e:
                 print(f"Alarm error: {e}")
-
         return payload
-
+    
     async def logic(self, image, cam_id, cam_data):
         try:
             cam_data = cam_data if cam_data is not None else {"detection": [], "machineCount": 0}
@@ -214,6 +211,7 @@ class CCTV_AI:
             return base64.b64encode(buffer).decode('utf-8') if success else ""
 
     def cleanup(self):
+        self.shared_data.set_LIFE('inactive')
         print("Cleaning up CCTV_AI...")
         self.stop_process = True
         for cam in getattr(self, 'cameras', []):

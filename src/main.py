@@ -32,11 +32,17 @@ class AIcontoll(BaseModel):
     acction: str
     roi: List[dict] = None
     confidence_threshold: float = None
+# rtsp_urls = [
+#     "rtsp://192.168.1.1:8554/cam1",
+#     "rtsp://192.168.1.1:8554/cam2",
+#     "rtsp://192.168.1.1:8554/cam3",
+#     "rtsp://192.168.1.1:8554/cam4"
+# ]
 rtsp_urls = [
-    "rtsp://192.168.1.1:8554/cam1",
-    "rtsp://192.168.1.1:8554/cam2",
-    "rtsp://192.168.1.1:8554/cam3",
-    "rtsp://192.168.1.1:8554/cam4"
+    "images/video_test/cam1_h264.mp4",
+    "images/video_test/cam2_h264.mp4",
+    "images/video_test/cam3_h264.mp4",
+    "images/video_test/cam4_h264.mp4"
 ]
 
 #  -----------------------------FastAPI app and lifespan----------------------------------------------
@@ -48,11 +54,10 @@ async def lifespan(app: FastAPI):
     # await sio.connect(nodeJS_URL)
     asyncio.create_task(connect_socketio())
     task2 = asyncio.create_task(send_status('stanby'))
-    cctv_task = asyncio.create_task(run_cctv_ai())
+    # cctv_task = asyncio.create_task(run_cctv_ai())
     # asyncio.create_task(send_status())
     asyncio.create_task(send_status('now'))
     yield
-    shared_data.set_active_device(0)
     task1.cancel()
     task2.cancel()
     if cctv_ai:
@@ -78,7 +83,7 @@ async def control_ai(control: AIcontoll):
     with open ('./config/confident.json','w') as f:
         json.dump({"confidence": confidence_threshold}, f, indent=4)
     shared_data.set_confidence_threshold(confidence_threshold)
-    # print(f"Control AI: action={control.acction}, roi={roi}, confidence_threshold={confidence_threshold}")
+    print(f"Control AI: action={control.acction}, roi={roi}, confidence_threshold={confidence_threshold}")
     if control.acction == "start":
         if cctv_ai is not None:
             return {"message": "AI is already running"}
@@ -207,14 +212,9 @@ async def register_device():
             except Exception as e:
                 print(f"Device config error: {e}")
                 device_config = {}
-
             saved_api_key = device_config.get('apiKey')
-
-
             if not saved_api_key:
                 await reg()
-            
-
             else:
                 try:
                     async with httpx.AsyncClient() as requests:
@@ -309,7 +309,7 @@ def init_cctv_ai_frame(rtsp_urls, max_retries=5):
 async def run_cctv_ai():
     global LIFE, cctv_ai
     try:
-        shared_data.set_LIFE('active')
+        shared_data.set_active_device(0)
         global rtsp_urls
         
         from tritonclient.grpc import aio as grpc

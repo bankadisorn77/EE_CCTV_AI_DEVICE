@@ -4,9 +4,9 @@ from tritonclient.grpc import aio as grpc
 import tritonclient.utils.shared_memory as shm
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-MODEL_NAME = 'model' 
+# from datetime import datetime
 
+MODEL_NAME = 'model' 
 cpu_executor = ThreadPoolExecutor(max_workers=4)
 shm_regions = {}
 
@@ -25,8 +25,7 @@ async def predict_model(img, triton_client, config_cam, size=640, conf=0.5):
         cpu_executor, 
         process_image, 
         results, img, croped_shape, config_cam, size, conf
-    )
-             
+    )   
     return img, payload
 
 
@@ -68,7 +67,7 @@ def process_image(results, img, croped_shape, config_cam, size=640, conf=0.5):
             "conf": round(conf_score, 2),
         })
        
-    cv2.imwrite(f"debug_box_{config_cam['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg", img)  
+    # cv2.imwrite(f"debug_box_{config_cam['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg", img)  
     result = {
         "detection": detection_class,
         "machineCount": count if count is not None else 0,
@@ -80,18 +79,17 @@ def cv2_preprocess(img, config_cam, size):
     if config_cam is not None and config_cam["roi"] is not None:
         try:
             roi = config_cam["roi"]
-            img = img[roi["row1"]:roi["row2"], roi["col1"]:roi["col2"]]
+            img = img[roi["row1"]:roi["row2"], roi["col1"]:roi["col2"]].copy()
             croped_shape = img.shape[:2]
-            cv2.imwrite(f"debug_pre_{config_cam['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg", img) 
         except Exception as e:
             print(f"Error in cropping image: {e}")
-    img = cv2.resize(img, (size, size), interpolation=cv2.INTER_NEAREST)
+    img = cv2.resize(img, (size, size))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) 
-    img = np.ascontiguousarray(
-        img.transpose(2, 0, 1)[np.newaxis], 
-        dtype=np.float16
-    ) 
-    return img, croped_shape
+    img = img.transpose(2, 0, 1)
+    img = np.expand_dims(img, axis=0)
+    input_tensor = np.array(img, dtype=np.float32, order='C')
+    
+    return input_tensor, croped_shape
 
 async def preprocess(image, config_cam, size):
     loop = asyncio.get_event_loop()
@@ -128,7 +126,7 @@ async def prediction(numpy_img, triton_client, cam_name):
 
     shm.set_shared_memory_region(shm_regions[shm_name]["handle"], [numpy_img])
 
-    inputs = [grpc.InferInput("images", numpy_img.shape, "FP16")]
+    inputs = [grpc.InferInput("images", numpy_img.shape, "FP32")]
     inputs[0].set_shared_memory(shm_name, input_byte_size)
     outputs = [grpc.InferRequestedOutput("output0")]
 

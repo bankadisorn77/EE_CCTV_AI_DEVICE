@@ -3,9 +3,9 @@
         "name": "cam1",
         "machineCount": 3,
         "roi": {
-            "col1": 452,
+            "col1": 470,
             "row1": 284,
-            "col2": 1862,
+            "col2": 1858,
             "row2": 1078
         }
     },
@@ -13,30 +13,30 @@
         "name": "cam2",
         "machineCount": 4,
         "roi": {
-            "col1": 124,
-            "row1": 226,
-            "col2": 1816,
-            "row2": 1074
+            "col1": 98,
+            "row1": 270,
+            "col2": 1778,
+            "row2": 1078
         }
     },
     {
         "name": "cam3",
         "machineCount": 3,
         "roi": {
-            "col1": 218,
-            "row1": 244,
-            "col2": 1332,
-            "row2": 844
+            "col1": 262,
+            "row1": 236,
+            "col2": 1320,
+            "row2": 850
         }
     },
     {
         "name": "cam4",
         "machineCount": 4,
         "roi": {
-            "col1": 442,
-            "row1": 258,
-            "col2": 1810,
-            "row2": 890
+            "col1": 446,
+            "row1": 254,
+            "col2": 1794,
+            "row2": 844
         }
     }
 ]

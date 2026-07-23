@@ -2,6 +2,7 @@ import threading
 import cv2
 import time
 import os
+import platform
 
 class Acquisition:
     def __init__(self, url, key="cam1",on_stream_end=None):
@@ -47,15 +48,17 @@ class Acquisition:
             else:
                 print(f"[{self.name}] File exists at: {abs_path}")
 
-            pipeline = (
-                f"filesrc location={abs_path} ! "
-                f"qtdemux ! h264parse ! nvv4l2decoder ! "
-                f"nvvidconv ! video/x-raw, format=BGRx ! "
-                f"videoconvert ! video/x-raw, format=BGR ! "
-                f"appsink drop=true sync=false max-buffers=1"
-            )
-            
-            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            if platform.system() == 'Linux' and platform.machine() == 'aarch64':
+                pipeline = (
+                    f"filesrc location={abs_path} ! "
+                    f"qtdemux ! h264parse ! nvv4l2decoder ! "
+                    f"nvvidconv ! video/x-raw, format=BGRx ! "
+                    f"videoconvert ! video/x-raw, format=BGR ! "
+                    f"appsink drop=true sync=false max-buffers=1"
+                )
+                self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            else:
+                self.cap = cv2.VideoCapture(abs_path, cv2.CAP_FFMPEG)
         else:
             self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 
@@ -76,8 +79,6 @@ class Acquisition:
             self.t.join(timeout=2.0)
 
     def _update(self):
-        TARGET_FPS = 30
-        interval = 1.0 / TARGET_FPS
         while not self.stop_process:
             if self.cap is None:
                 self._reconnect()
@@ -86,13 +87,15 @@ class Acquisition:
             ret, frame = self.cap.read()
             if not ret:
                 print(f"[{self.name}] Stream lost, reconnecting...")
-                self.cap.release()
+                if self.cap:
+                    self.cap.release()
                 self.cap = None
+                time.sleep(0.5)
                 continue
 
             with self._lock:
+                # เก็บเฟรมสดใหม่ล่าสุดไว้เสมอ
                 self._image = frame
-            time.sleep(interval)
 
         if self.cap is not None:
             try:

@@ -1,5 +1,13 @@
 {
-    "ip": "192.168.1.3",
-    "mac": "fe80::59cf:2cad:1062:454b",
-    "apiKey": "9391c0bd9b9deef4af27337fe04f15ccf698dc5134a67921bbb43c75a1d3277e"
+    "rstp_url": [
+        "test/C01.mp4",
+        "test/C02.mp4",
+        "test/C03.mp4",
+        "test/C04.mp4"
+    ],
+    "webserver_url": "10.153.90.135",
+    "webserver_port": 3030,
+    "ip": "10.153.90.135",
+    "mac": "fe80::28e6:7e01:d0a3:859%19",
+    "apiKey": "90d66b12c2128a3e4b06554edd1e4fde0540cc0b554e8c4162392719441c9d29"
 }

@@ -1,14 +1,45 @@
 {
-    "rstp_url":[
-        "",
-        "",
-        "",
-        ""
+    "cameras": [
+        {
+            "name": "cam1",
+            "machineCount": 3,
+            "roi": {
+                "col1": 488,
+                "row1": 274,
+                "col2": 1772,
+                "row2": 1072
+            }
+        },
+        {
+            "name": "cam2",
+            "machineCount": 3,
+            "roi": {
+                "col1": 200,
+                "row1": 312,
+                "col2": 1766,
+                "row2": 1078
+            }
+        },
+        {
+            "name": "cam3",
+            "machineCount": 3,
+            "roi": {
+                "col1": 246,
+                "row1": 242,
+                "col2": 1486,
+                "row2": 932
+            }
+        },
+        {
+            "name": "cam4",
+            "machineCount": 4,
+            "roi": {
+                "col1": 454,
+                "row1": 228,
+                "col2": 1808,
+                "row2": 932
+            }
+        }
     ],
-    "triton_url":"localhost:8001",
-    "webserver_url":"localhost",
-    "webserver_port":8000,
-    "ip":"127.0.0.1",
-    "mac":"00:00:00:00:00:00",
-    "apiKey":"your_api_key_here"
+    "confidence_threshold": 0.8
 }

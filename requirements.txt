@@ -1,0 +1,23 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Core ML / vision
+numpy<2.0
+opencv-python
+ultralytics
+
+# Torch 
+torch
+torchvision
+torchaudio
+
+# API / server
+fastapi
+python-socketio[asyncio_client]
+aiohttp
+uvicorn[standard]
+httpx
+psutil
+pydantic>=2.0,<3.0
+
+# JPEG decoding support (Downgraded to prevent libjpeg-turbo conflicts on Linux)
+PyTurboJPEG<2.0

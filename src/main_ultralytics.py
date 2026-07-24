@@ -8,6 +8,7 @@ from time import time
 from fastapi import FastAPI, Response
 import socketio
 import uvicorn
+import signal
 from contextlib import asynccontextmanager
 import httpx
 import json
@@ -128,7 +129,7 @@ async def control_ai(control: AIcontoll):
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config_data, f, indent=4)
 
-    print(f"Control AI: action={control.action}, roi={roi}, confidence_threshold={confidence_threshold}")
+    # print(f"Control AI: action={control.action}, roi={roi}, confidence_threshold={confidence_threshold}")
     if control.action == "start":
         if cctv_ai is not None:
             return {"message": "AI is already running"}
@@ -148,9 +149,59 @@ async def control_ai(control: AIcontoll):
 async def get_initial_frames():
     global rtsp_urls
     image_base64_frames = init_cctv_ai_frame(rtsp_urls)
-    print(image_base64_frames['cam1'])
     return image_base64_frames
+@app.post('/reset')
+async def reset():
+    try:
+        # 1. Reset config.json to its default state
+        default_config = {
+            "cameras": [
+                {
+                    "name": f"cam{i+1}",
+                    "machineCount": 0,
+                    "roi": {"row1": None, "col1": None, "row2": None, "col2": None}
+                }
+                for i in range(len(rtsp_urls))
+            ],
+            "confidence_threshold": 0.5
+        }
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(default_config, f, indent=4)
+        print("config.json has been reset to default values.")
 
+        # 2. Clear sensitive/unique fields in device.json
+        try:
+            with DEVICE_CONFIG_PATH.open('r') as f:
+                device_conf = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            device_conf = {}
+
+        device_conf['ip'] = ""
+        device_conf['mac'] = ""
+        device_conf['apiKey'] = ""
+        
+        with DEVICE_CONFIG_PATH.open('w') as f:
+            json.dump(device_conf, f, indent=4)
+        print("ip, mac, and apiKey in device.json have been cleared.")
+
+    except Exception as e:
+        print(f"Error during reset file operations: {e}")
+        return Response(status_code=500, content=f"Error during reset: {e}")
+
+    # 3. Schedule a graceful shutdown
+    async def shutdown():
+        await asyncio.sleep(1)  # Allow time for the HTTP response to be sent
+        print("Shutting down application...")
+        os.kill(os.getpid(), signal.SIGINT)
+
+    asyncio.create_task(shutdown())
+    
+    return {"message": "Device reset successfully. Shutting down."}
+
+@app.post('/restart')
+async def restart():
+    return {"success": True}
+    
 # ----------------------------------------------socketio events-----------------------------------------------------------
 @sio.event
 async def connect():

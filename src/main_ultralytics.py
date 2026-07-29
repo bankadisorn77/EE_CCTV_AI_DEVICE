@@ -328,6 +328,20 @@ async def register_device():
                         
                         if res.status_code == httpx.codes.OK:
                             API_KEY = saved_api_key
+                            try:
+                                async with httpx.AsyncClient() as requests:
+                                    headers = {
+                                        "Content-Type": "application/json",
+                                        "x-api-key": API_KEY
+                                    }
+                                    payload = {'frame':image_base64_frames}
+                                    res = await requests.post(f"{nodeJS_URL}/api/device/re-captureImage", headers=headers,json=payload)
+                                    if res.status_code == httpx.codes.OK:
+                                        print('✅ Re-capture Image success')
+                                    else:
+                                        print('Re-capture Image failed')
+                            except Exception as e :
+                                print(f'Re-capture Image failed:{e}')
                             print("✅ Device already registered with valid API key.")
                         else:
                             print("⚠️ API key invalid (Server rejected), re-registering device.")
@@ -413,11 +427,6 @@ async def run_cctv_ai():
     try:
         shared_data.set_active_device(1)
         global rtsp_urls
-        
-        # REMOVED Triton client setup
-        # from tritonclient.grpc import aio as grpc
-        # triton_client = grpc.InferenceServerClient("localhost:8001")
-        
         cctv_ai = CCTV_AI(rtsp_urls, shared_data,API_KEY,nodeJS_URL)
         await cctv_ai.run() # MODIFIED: run without client
     except Exception as e:

@@ -6,8 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from ultralytics import YOLO
 
-# Load the Ultralytics model from the engine file
-# Using forward slashes for better path compatibility.
 MODEL = YOLO('models/best_V6.pt', task='detect')
 
 cpu_executor = ThreadPoolExecutor(max_workers=4)
@@ -145,53 +143,52 @@ async def preprocess(image, config_cam, size):
     return img, croped_shape, letterbox_info
 
 if __name__ == "__main__":
+    import os
+    os.makedirs("test/alam", exist_ok=True)
+
     async def main():
-        """
-        Asynchronous function to run real-time inference on multiple video files and display the results.
-        """
-        # List of video paths for testing
         video_paths = [
-            ".\\test\\D01.mp4",
-            ".\\test\\D02.mp4",
-            ".\\test\\D03.mp4",
-            ".\\test\\D04.mp4",
+            "./test/C01.mp4",
         ]
 
-        # Open video capture for each path
         caps = [cv2.VideoCapture(p) for p in video_paths]
         if not all(cap.isOpened() for cap in caps):
             print("Error: Could not open one or more video files.")
             return
 
-        # Create mock camera configurations for testing
         mock_configs = [{'name': f'cam{i+1}', 'roi': None, 'machineCount': 0} for i in range(len(video_paths))]
 
         try:
+            frame_idx = 0
             while True:
-                # Read a frame from each video
-                frames = [cap.read()[1] for cap in caps]
-
-                # If any frame is None (video ended), break the loop
-                if any(frame is None for frame in frames):
-                    print("A video has ended. Exiting.")
+                frames = [cap.read() for cap in caps]
+                
+                # ตรวจสอบว่ามีวิดีโอไหนจบหรืออ่านเฟรมไม่ได้ไหม
+                if any(not ret or frame is None for ret, frame in frames):
+                    print("A video has ended or invalid frame. Exiting.")
                     break
 
-                # Create a list of concurrent prediction tasks
-                tasks = [predict_model(frames[i], mock_configs[i]) for i in range(len(frames))]
-                results = await asyncio.gather(*tasks)
+                # รันทีละกล้องเพื่อป้องกันปัญหา Thread/CUDA ชนกัน
+                for i, (ret, frame) in enumerate(frames):
+                    config = mock_configs[i]
+                    # เรียก predict แบบรอทีละกล้อง
+                    processed_img, payload = await predict_model(frame, config)
+                    
+                    # บันทึกรูปภาพเก็บไว้เช็คผลลัพธ์แทนการใช้ cv2.imshow
+                    out_path = f"test/alam/cam{i+1}_frame_{frame_idx}.jpg"
+                    cv2.imwrite(out_path, processed_img)
+                    print(f"Processed Cam {i+1} -> Saved to {out_path}")
 
-                # Display the processed frames
-                for i, (processed_img, payload) in enumerate(results):
-                    cv2.imshow(f"Real-time Detection - Cam {i+1}", processed_img)
-                    # print(f'CAM {i+1} Payload: {payload}')
+                frame_idx += 1
+                
+                # ทดสอบรันสัก 10 เฟรมพอสำหรับเทส (หรือลบเงื่อนไขนี้ออกถ้าจะรันยาวๆ)
+                # if frame_idx >= 10:
+                #     print("Test finished 10 frames.")
+                #     break
 
-                # Exit on 'q' key press
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
         finally:
-            # Clean up resources
             for cap in caps:
                 cap.release()
-            cv2.destroyAllWindows()
+            print("All video captures released.")
 
     asyncio.run(main())

@@ -74,7 +74,6 @@ class CCTV_AI_Ultralytics: # Renamed class
         interval = 1.0 / TARGET_FPS
 
         while not self.stop_process:
-            # ใช้ Lock ดึงภาพอย่างปลอดภัย ไม่ให้ Thread อื่นเขียนทับระหว่าง Copy
             frame = None
             with camera._lock:
                 if camera._image is not None:

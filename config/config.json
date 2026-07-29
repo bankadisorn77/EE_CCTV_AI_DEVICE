@@ -2,44 +2,44 @@
     "cameras": [
         {
             "name": "cam1",
-            "machineCount": 0,
+            "machineCount": 3,
             "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
+                "col1": 502,
+                "row1": 312,
+                "col2": 1846,
+                "row2": 1078
             }
         },
         {
             "name": "cam2",
-            "machineCount": 0,
+            "machineCount": 4,
             "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
+                "col1": 160,
+                "row1": 294,
+                "col2": 1780,
+                "row2": 1078
             }
         },
         {
             "name": "cam3",
-            "machineCount": 0,
+            "machineCount": 3,
             "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
+                "col1": 250,
+                "row1": 256,
+                "col2": 1310,
+                "row2": 844
             }
         },
         {
             "name": "cam4",
-            "machineCount": 0,
+            "machineCount": 4,
             "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
+                "col1": 436,
+                "row1": 248,
+                "col2": 1796,
+                "row2": 854
             }
         }
     ],
-    "confidence_threshold": 0.7
+    "confidence_threshold": 0.8
 }

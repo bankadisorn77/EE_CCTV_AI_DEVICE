@@ -21,6 +21,8 @@ from turbojpeg import TurboJPEG
 class CCTV_AI_Ultralytics: 
     def __init__(self, rtsp_urls, shared_data, API_KEY, nodeJS_URL):
         self.stop_process = False
+        self._cleanup_done = False
+        self._tasks = []
         self.shared_data = shared_data
         self.API_KEY = API_KEY
         self.nodeJS_URL = nodeJS_URL
@@ -45,17 +47,20 @@ class CCTV_AI_Ultralytics:
             for i in range(len(rtsp_urls))
         }
 
-        self.frame_queues = {f"cam{i+1}": asyncio.Queue(maxsize=2) for i in range(len(rtsp_urls))}
+        # Bound per-camera latency and memory: only keep the freshest pending frame.
+        self.frame_queues = {f"cam{i+1}": asyncio.Queue(maxsize=1) for i in range(len(rtsp_urls))}
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
 
+        # Readers reconnect independently; one camera must not abort pipeline startup.
         self.cameras = [
-            Acquisition(rtsp_urls[i], key=f"cam{i+1}", on_stream_end=self.cleanup)
+            Acquisition(rtsp_urls[i], key=f"cam{i+1}")
             for i in range(len(rtsp_urls))
         ]
         atexit.register(self.cleanup)
 
     def read_config(self):
         try:
-            config_path = "config/config.json"
+            config_path = PROJECT_ROOT / "config" / "config.json"
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
                 self.shared_data.set_config(config_data.get("cameras", []))
@@ -70,16 +75,14 @@ class CCTV_AI_Ultralytics:
         camera = self.cameras[cam_idx]
         camera.start()
         queue = self.frame_queues[camera.name]
-        TARGET_FPS = 30
-        interval = 1.0 / TARGET_FPS
+        interval = 1.0 / 30.0
+        last_frame_id = -1
 
         while not self.stop_process:
-            frame = None
-            with camera._lock:
-                if camera._image is not None:
-                    frame = camera._image.copy()
-
-            if frame is not None:
+            frame = camera.image
+            frame_id = camera.frame_id
+            if frame is not None and frame_id != last_frame_id:
+                last_frame_id = frame_id
                 if queue.full():
                     try:
                         queue.get_nowait()
@@ -87,36 +90,33 @@ class CCTV_AI_Ultralytics:
                     except asyncio.QueueEmpty:
                         pass
                 await queue.put({"frame": frame, "cam_key": camera.name})
-
             await asyncio.sleep(interval)
-    async def worker(self, cam_id): # REMOVED triton_client
+    async def worker(self, cam_id):
         queue = self.frame_queues[cam_id]
         print(f"Started Ultralytics Worker for {cam_id}")
 
         while not self.stop_process:
+            item = None
             try:
                 item = await queue.get()
                 frame = item["frame"]
                 cam_key = item["cam_key"]
                 cam_config = self.shared_data.get_config_by_cam(cam_key)
                 confidence = self.shared_data.get_confidence_threshold()
-                # cv2.imwrite(f"test/alam/test_input_{time.time()}_{cam_config.get('name', 'unknown')}.jpg", frame)
-                # MODIFIED: Call predict_model without triton_client
                 processed_img, detection_results = await model_process.predict_model(
-                    frame.copy(), cam_config, size=640, conf=confidence
+                    frame, cam_config, size=640, conf=confidence
                 )
-                
-                # self.update_process_fps(cam_key)
                 if processed_img is not None:
                     await self.logic(processed_img, cam_key, detection_results)
-                    # print(f"[{cam_key}] Detection Results: {detection_results}")
-
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 print(f"Worker Error on {cam_id}: {e}")
-                self.shared_data.set_LIFE('error')
+                self.shared_data.set_LIFE("error")
                 await asyncio.sleep(0.1)
             finally:
-                queue.task_done()
+                if item is not None:
+                    queue.task_done()
 
     def update_capture_fps(self, cam_key):
         stats = self.fps_stats[cam_key]
@@ -145,12 +145,21 @@ class CCTV_AI_Ultralytics:
             return self.fps_stats.get(cam_key, {})
         return self.fps_stats
 
-    async def run(self): # REMOVED triton_client
+    async def run(self):
         self.start_time = time.time()
         print("CCTV_AI System Running (Ultralytics Mode)...")
-        producers = [self.producer(i) for i in range(len(self.cameras))]
-        workers   = [self.worker(f"cam{i+1}") for i in range(len(self.cameras))] # REMOVED triton_client
-        await asyncio.gather(*producers, *workers)
+        self._tasks = [
+            asyncio.create_task(self.producer(i), name=f"camera-producer-{i+1}")
+            for i in range(len(self.cameras))
+        ] + [
+            asyncio.create_task(self.worker(f"cam{i+1}"), name=f"inference-worker-{i+1}")
+            for i in range(len(self.cameras))
+        ]
+        try:
+            await asyncio.gather(*self._tasks)
+        finally:
+            self.cleanup()
+            await asyncio.gather(self.http_client.aclose(), return_exceptions=True)
 
     async def alarm_detect(self, camid, detection_class, message, confidence, image):
         image_base64_str = ""
@@ -169,21 +178,16 @@ class CCTV_AI_Ultralytics:
             "imageBase64": f"data:image/jpeg;base64,{image_base64_str}" if image_base64_str else None
         }
 
-        async with httpx.AsyncClient() as client:
-            try:
-                res = await client.post(
-                    f'{self.nodeJS_URL}/api/device/alarm',
-                    headers={"Content-Type": "application/json", "x-api-key": self.API_KEY},
-                    json=payload,
-                    timeout=5.0
-                )
-                if res.status_code == 200:
-                    # print("Alarm sent successfully")
-                    pass
-                else:
-                    print(f"Alarm failed: {res.status_code} - {res.text}")
-            except Exception as e:
-                print(f"Alarm error: {e}")
+        try:
+            res = await self.http_client.post(
+                f"{self.nodeJS_URL}/api/device/alarm",
+                headers={"Content-Type": "application/json", "x-api-key": self.API_KEY},
+                json=payload,
+            )
+            if res.status_code != 200:
+                print(f"Alarm failed: {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"Alarm error: {e}")
         return payload
     
     async def logic(self, image, cam_id, cam_data):
@@ -222,14 +226,19 @@ class CCTV_AI_Ultralytics:
             return base64.b64encode(buffer).decode('utf-8') if success else ""
 
     def cleanup(self):
-        self.shared_data.set_LIFE('active')
-        print("Cleaning up CCTV_AI (Ultralytics)...")
+        if self._cleanup_done:
+            return
+        self._cleanup_done = True
         self.stop_process = True
-        for cam in getattr(self, 'cameras', []):
+        print("Cleaning up CCTV_AI (Ultralytics)...")
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+        for cam in getattr(self, "cameras", []):
             try:
                 cam.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Camera stop warning: {exc}")
         try:
             cv2.destroyAllWindows()
         except Exception:
@@ -239,4 +248,5 @@ class CCTV_AI_Ultralytics:
                 torch.cuda.empty_cache()
         except Exception:
             pass
+        self.shared_data.set_LIFE("active")
         print("CCTV_AI (Ultralytics) cleanup complete.")

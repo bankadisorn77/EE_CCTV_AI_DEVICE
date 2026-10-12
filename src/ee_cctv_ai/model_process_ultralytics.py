@@ -1,14 +1,20 @@
-import time 
+import os
+import time
 import numpy as np
 import cv2
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from pathlib import Path
 from ultralytics import YOLO
 
-MODEL = YOLO('models/best_V6.pt', task='detect')
-
+MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "best_V6.pt"
+MODEL = YOLO(str(MODEL_PATH), task="detect")
 cpu_executor = ThreadPoolExecutor(max_workers=4)
+# Shared YOLO/GPU instance: serialize prediction until target-device tests prove
+# concurrent calls are safe and improve throughput.
+_inference_lock = asyncio.Lock()
+SAVE_DEBUG_IMAGES = os.getenv("EE_CCTV_SAVE_DEBUG_IMAGES", "0").lower() in {"1", "true", "yes"}
 
 def process_image_ultralytics(
     result_obj, img, roi_offset, config_cam, conf=0.5
@@ -62,8 +68,9 @@ async def predict_model(img, config_cam, size=640, conf=0.5):
 
     loop = asyncio.get_event_loop()
     try:
-        predict_func = partial(MODEL.predict, cropped_img, imgsz=size, verbose=False)
-        results_obj = await loop.run_in_executor(cpu_executor, predict_func)
+        predict_func = partial(MODEL.predict, cropped_img, imgsz=size, conf=conf, verbose=False)
+        async with _inference_lock:
+            results_obj = await loop.run_in_executor(cpu_executor, predict_func)
 
         # Extract results [x1, y1, x2, y2, conf, cls]
         results = results_obj[0].boxes.data.cpu().numpy()
@@ -87,8 +94,10 @@ async def predict_model(img, config_cam, size=640, conf=0.5):
         config_cam,
         conf,
     )
-    # print(payload)
-    cv2.imwrite(f"test/alam/test_output_{time.time()}_{config_cam.get('name', 'unknown')}.jpg", img)
+    if SAVE_DEBUG_IMAGES:
+        os.makedirs("test/alam", exist_ok=True)
+        cam_name = config_cam.get("name", "unknown") if config_cam else "unknown"
+        cv2.imwrite(f"test/alam/test_output_{time.time()}_{cam_name}.jpg", img)
     return img, payload
 
 
@@ -129,8 +138,10 @@ def cv2_preprocess(img, config_cam, size):
     roi_offset = (col1, row1)
     # print(f"{config_cam.get('name', 'unknown')} Original image shape: {img.shape}, Cropped image shape: {cropped_img.shape}")
     # print(f"DEBUG [{config_cam.get('name')}] ROI input from config: {roi}")
-    cam_name = config_cam.get("name", "unknown") if config_cam is not None else "unknown"
-    cv2.imwrite(f"test/alam/test_cropped_img{cam_name}.jpg", cropped_img)
+    if SAVE_DEBUG_IMAGES:
+        os.makedirs("test/alam", exist_ok=True)
+        cam_name = config_cam.get("name", "unknown") if config_cam is not None else "unknown"
+        cv2.imwrite(f"test/alam/test_cropped_img{cam_name}.jpg", cropped_img)
     return cropped_img, croped_shape, roi_offset
 
 async def preprocess(image, config_cam, size):

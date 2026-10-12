@@ -1,131 +1,136 @@
-import threading
-import cv2
-import time
+"""Per-camera frame acquisition with isolated reconnect handling."""
 import os
 import platform
+import threading
+import time
+import cv2
+
 
 class Acquisition:
-    def __init__(self, url, key="cam1",on_stream_end=None):
-        print(f"Initializing camera {key} with URL: {url}")
-        self.cap = None
+    def __init__(self, url, key="cam1", on_stream_end=None):
         self.url = url
+        self.name = key
+        self.on_stream_end = on_stream_end  # compatibility only; no pipeline-wide shutdown
+        self.cap = None
         self._image = None
         self._lock = threading.Lock()
-        self.width = -1
-        self.height = -1
         self.stop_process = False
-        self.scale_factor = -1
-        self.name = key
-        self.on_stream_end = on_stream_end
-        self.initial()
+        self.t = None
+        self.frame_id = 0
+        self.connected = False
+        self._reconnect_count = 0
 
     @property
     def image(self):
         with self._lock:
-            return self._image
+            return None if self._image is None else self._image.copy()
 
     def initial(self):
         if self.cap is not None:
             return
-        target_size = 640 
-
-        if isinstance(self.url, str) and self.url.startswith('rtsp://'):
+        if isinstance(self.url, str) and self.url.startswith("rtsp://"):
             pipeline = (
                 f"rtspsrc location={self.url} latency=0 ! "
-                f"rtph264depay ! h264parse ! nvv4l2decoder ! "
-                f"nvvidconv ! video/x-raw, format=BGRx ! "  
-                f"videoconvert ! video/x-raw, format=BGR ! "
-                f"appsink drop=true sync=false max-buffers=1"    
+                "rtph264depay ! h264parse ! nvv4l2decoder ! "
+                "nvvidconv ! video/x-raw, format=BGRx ! "
+                "videoconvert ! video/x-raw, format=BGR ! "
+                "appsink drop=true sync=false max-buffers=1"
             )
-            # print(f"[{self.name}] Connecting to RTSP via GStreamer NVDEC + VIC...")
-            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-            
-        elif isinstance(self.url, str) and self.url.endswith('.mp4'):
+            cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        elif isinstance(self.url, str) and self.url.endswith(".mp4"):
             abs_path = os.path.abspath(self.url)
-    
-            if not os.path.exists(abs_path):
-                print(f"[{self.name}] ERROR: File NOT FOUND at: {abs_path}")
-            else:
-                print(f"[{self.name}] File exists at: {abs_path}")
-                
-            if platform.system() == 'Linux' and platform.machine() == 'aarch64':
+            cap = None
+            if platform.system() == "Linux" and platform.machine() == "aarch64":
                 pipeline = (
-                    f"filesrc location=\"{abs_path}\" ! "
-                    f"qtdemux name=d d.video_0 ! queue ! h264parse ! nvv4l2decoder ! "
-                    f"nvvidconv ! video/x-raw, format=BGRx ! "
-                    f"videoconvert ! video/x-raw, format=BGR ! "
-                    f"appsink drop=true sync=false max-buffers=1"
+                    f'filesrc location="{abs_path}" ! '
+                    "qtdemux name=d d.video_0 ! queue ! h264parse ! nvv4l2decoder ! "
+                    "nvvidconv ! video/x-raw, format=BGRx ! "
+                    "videoconvert ! video/x-raw, format=BGR ! "
+                    "appsink drop=true sync=false max-buffers=1"
                 )
-                self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-
-            if self.cap is None or not self.cap.isOpened():
-                print(f"[{self.name}] Warning: GStreamer pipeline failed or not supported in this OpenCV build. Falling back to default VideoCapture...")
-                self.cap = cv2.VideoCapture(abs_path)
+                cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            if cap is None or not cap.isOpened():
+                if cap is not None:
+                    cap.release()
+                cap = cv2.VideoCapture(abs_path)
         else:
-            self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        if not self.cap.isOpened():
-            self.cap = None
-            raise Exception("Failed to open video stream from " + self.url)
+            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError(f"Failed to open video stream for {self.name}")
+        self.cap = cap
+        self.connected = True
 
     def start(self):
+        if self.t is not None and self.t.is_alive():
+            return
         self.stop_process = False
-        self.t = threading.Thread(target=self._update, daemon=True)
+        self.t = threading.Thread(target=self._update, name=f"{self.name}-reader", daemon=True)
         self.t.start()
 
     def stop(self):
         self.stop_process = True
-        if hasattr(self, 't') and self.t.is_alive():
+        cap = self.cap
+        self.cap = None
+        self.connected = False
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
+        if self.t is not None and self.t.is_alive() and threading.current_thread() is not self.t:
             self.t.join(timeout=2.0)
 
     def _update(self):
         while not self.stop_process:
             if self.cap is None:
-                self._reconnect()
+                try:
+                    self.initial()
+                    self._reconnect_count = 0
+                    print(f"[{self.name}] Camera connected")
+                except Exception as exc:
+                    self.connected = False
+                    self._reconnect_count += 1
+                    delay = min(10.0, 0.5 * (2 ** min(self._reconnect_count - 1, 5)))
+                    print(f"[{self.name}] Connect failed ({self._reconnect_count}); retrying in {delay:.1f}s: {exc}")
+                    self._wait_or_stop(delay)
+                    continue
+            cap = self.cap
+            if cap is None:
                 continue
-
-            ret, frame = self.cap.read()
-            if not ret:
-                print(f"[{self.name}] Stream lost, reconnecting...")
-                if self.cap:
-                    self.cap.release()
-                self.cap = None
-                time.sleep(0.5)
-                continue
-
-            with self._lock:
-                # เก็บเฟรมสดใหม่ล่าสุดไว้เสมอ
-                self._image = frame
-
-        if self.cap is not None:
             try:
-                self.cap.release()
+                ret, frame = cap.read()
+            except Exception as exc:
+                print(f"[{self.name}] Frame read failed: {exc}")
+                ret, frame = False, None
+            if not ret or frame is None:
+                self.connected = False
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                if self.cap is cap:
+                    self.cap = None
+                self._wait_or_stop(0.5)
+                continue
+            with self._lock:
+                self._image = frame
+                self.frame_id += 1
+            self.connected = True
+        cap = self.cap
+        self.cap = None
+        self.connected = False
+        if cap is not None:
+            try:
+                cap.release()
             except Exception:
                 pass
-            self.cap = None
 
-    def _reconnect(self):
-        # self.on_stream_end()
-        RETRY_DELAY = 10
-        MAX_RETRY = 50
-        self._reconnect_count = getattr(self, '_reconnect_count', 0) + 1
-        
-        print(f"[{self.name}] Attempting reconnect to {self.url} ({self._reconnect_count}/{MAX_RETRY})")
-        
-        if self._reconnect_count > MAX_RETRY:
-            print(f"[{self.name}] Max retry exceeded, triggering cleanup...")
-            self.stop_process = True
-            if self.on_stream_end:
-                self.on_stream_end()
-            return
-        
-        time.sleep(RETRY_DELAY)
-        try:
-            self.initial()  
-            if self.cap and self.cap.isOpened():
-                self._reconnect_count = 0
-                print(f"[{self.name}] Reconnected successfully")
-        except Exception as e:
-            print(f"[{self.name}] Reconnect error: {e}") 
+    def _wait_or_stop(self, seconds):
+        deadline = time.monotonic() + seconds
+        while not self.stop_process and time.monotonic() < deadline:
+            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))

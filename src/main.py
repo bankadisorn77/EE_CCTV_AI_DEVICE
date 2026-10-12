@@ -66,6 +66,7 @@ LIFE = None
 nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}")
 cctv_task = None
 cctv_ai = None
+register_task = None
 class AIcontoll(BaseModel):
     action: str
     roi: List[dict] = None
@@ -81,23 +82,30 @@ class AIcontoll(BaseModel):
 #  -----------------------------FastAPI app and lifespan----------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global cctv_ai, cctv_task,shared_data
-    task1 = asyncio.create_task(register_device())
-    await task1  
-    # await sio.connect(nodeJS_URL)
-    asyncio.create_task(connect_socketio())
-    task2 = asyncio.create_task(send_status('stanby'))
-    # cctv_task = asyncio.create_task(run_cctv_ai())
-    # asyncio.create_task(send_status())
-    asyncio.create_task(send_status('now'))
-    yield
-    task1.cancel()
-    task2.cancel()
-    if cctv_ai:
-        cctv_ai = None
-    if cctv_task:
-        cctv_task.cancel()
-    await sio.disconnect()
+    global cctv_ai, cctv_task, register_task
+    background_tasks = []
+    register_task = asyncio.create_task(register_device(), name="device-registration")
+    background_tasks.append(register_task)
+    background_tasks.append(asyncio.create_task(connect_socketio(), name="socketio-connection"))
+    background_tasks.append(asyncio.create_task(send_status("stanby"), name="status-standby"))
+    background_tasks.append(asyncio.create_task(send_status("now"), name="status-now"))
+    try:
+        yield
+    finally:
+        if cctv_ai is not None:
+            cctv_ai.cleanup()
+        if cctv_task is not None and not cctv_task.done():
+            cctv_task.cancel()
+            try:
+                await cctv_task
+            except asyncio.CancelledError:
+                pass
+        for task in background_tasks:
+            if not task.done():
+                task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+        await sio.disconnect()
    
 
 
@@ -132,25 +140,32 @@ async def control_ai(control: AIcontoll):
 
     # print(f"Control AI: action={control.action}, roi={roi}, confidence_threshold={confidence_threshold}")
     if control.action == "start":
-        if cctv_ai is not None:
+        if cctv_task is not None and not cctv_task.done():
             return {"message": "AI is already running"}
-        else:
-            cctv_task = asyncio.create_task(run_cctv_ai())
+        cctv_task = asyncio.create_task(run_cctv_ai(), name="cctv-pipeline")
         shared_data.set_active_device(1)
+        await send_status("now")
         return {"message": "AI started"}
-    elif control.action == "stop":
+    if control.action == "stop":
         if cctv_ai is not None:
             cctv_ai.cleanup()
-            cctv_ai = None
+        if cctv_task is not None and not cctv_task.done():
+            cctv_task.cancel()
+            try:
+                await cctv_task
+            except asyncio.CancelledError:
+                pass
+        cctv_task = None
+        cctv_ai = None
         shared_data.set_active_device(0)
+        await send_status("now")
         return {"message": "AI stopped"}
-    await send_status('now')
+    return {"message": "Unsupported action", "action": control.action}
     
 @app.get("/initial-frames")
 async def get_initial_frames():
-    global rtsp_urls
-    image_base64_frames = init_cctv_ai_frame(rtsp_urls)
-    return image_base64_frames
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, init_cctv_ai_frame, rtsp_urls)
 @app.post('/reset')
 async def reset():
     try:
@@ -286,7 +301,8 @@ def get_jetson_stats(status):
 
 async def register_device():
     global API_KEY, rtsp_urls
-    image_base64_frames = init_cctv_ai_frame(rtsp_urls)
+    loop = asyncio.get_running_loop()
+    image_base64_frames = await loop.run_in_executor(None, init_cctv_ai_frame, rtsp_urls)
     async def reg():
         print("Device config missing mcId or apiKey")
         URL = f'{nodeJS_URL}/api/device/register'
@@ -433,8 +449,7 @@ def init_cctv_ai_frame(rtsp_urls, max_retries=5):
             attempt += 1
             print(f"Error in init_cctv_ai_frame: {e}")
             print(f"Retrying... ({attempt}/{max_retries}) in 5 seconds")
-            import time
-            time.sleep(5) 
+            await asyncio.sleep(5) 
             
     print("FATAL: Failed to initialize CCTV frames after multiple attempts.")
     return None
@@ -442,16 +457,22 @@ def init_cctv_ai_frame(rtsp_urls, max_retries=5):
 
 async def run_cctv_ai():
     global LIFE, cctv_ai
+    pipeline = None
     try:
         shared_data.set_active_device(1)
-        global rtsp_urls
-        cctv_ai = CCTV_AI(rtsp_urls, shared_data,API_KEY,nodeJS_URL)
-        await cctv_ai.run() # MODIFIED: run without client
+        pipeline = CCTV_AI(rtsp_urls, shared_data, API_KEY, nodeJS_URL)
+        cctv_ai = pipeline
+        await pipeline.run()
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        shared_data.set_LIFE('inactive')
+        shared_data.set_LIFE("inactive")
         print(f"CCTV_AI Error: {e}")
     finally:
+        if pipeline is not None:
+            pipeline.cleanup()
         cctv_ai = None
+        shared_data.set_active_device(0)
 
 def runserverTriton():
         

@@ -3,7 +3,6 @@ from pathlib import Path
 import torch
 import cv2
 import asyncio
-import json
 import atexit
 import time
 import base64
@@ -16,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.ee_cctv_ai import model_process_ultralytics as model_process
 from src.ee_cctv_ai.acquistion import Acquisition
 from src.ee_cctv_ai.alert_service import AlertService
+from src.ee_cctv_ai.config_store import load_config
 from turbojpeg import TurboJPEG
 
 class CCTV_AI_Ultralytics: 
@@ -60,12 +60,10 @@ class CCTV_AI_Ultralytics:
 
     def read_config(self):
         try:
-            config_path = PROJECT_ROOT / "config" / "config.json"
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-                self.shared_data.set_config(config_data.get("cameras", []))
-                self.shared_data.set_confidence_threshold(config_data.get("confidence_threshold", 0.5))
-                print("Unified config loaded successfully.")
+            config_data = load_config(PROJECT_ROOT / "config" / "config.json")
+            self.shared_data.set_config(config_data.get("cameras", []))
+            self.shared_data.set_confidence_threshold(config_data.get("confidence_threshold", 0.5))
+            print("Unified config loaded successfully.")
         except Exception as e:
             print(f"Config error (config.json): {e}")
             self.shared_data.set_config([{"name": f"cam{i+1}", "roi": None} for i in range(len(self.urls))])

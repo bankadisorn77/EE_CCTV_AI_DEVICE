@@ -46,6 +46,7 @@ from src.shere_data import data
 from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
 from src.ee_cctv_ai.schemas import AIControlRequest
+from src.ee_cctv_ai.config_store import load_config, save_config
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -137,11 +138,7 @@ async def control_ai(control: AIControlRequest):
     roi = control.roi
     confidence_threshold = control.confidence_threshold
 
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            config_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        config_data = {}
+    config_data = load_config(CONFIG_PATH)
 
     if roi is not None:
         config_data["cameras"] = roi
@@ -151,8 +148,7 @@ async def control_ai(control: AIControlRequest):
         config_data["confidence_threshold"] = confidence_threshold
         shared_data.set_confidence_threshold(confidence_threshold)
 
-    with open(CONFIG_PATH, 'w') as f:
-        json.dump(config_data, f, indent=4)
+    save_config(config_data, CONFIG_PATH)
 
     # print(f"Control AI: action={control.action}, roi={roi}, confidence_threshold={confidence_threshold}")
     if control.action == "start":
@@ -197,8 +193,7 @@ async def reset():
             ],
             "confidence_threshold": 0.5
         }
-        with open(CONFIG_PATH, 'w') as f:
-            json.dump(default_config, f, indent=4)
+        save_config(default_config, CONFIG_PATH)
         print("config.json has been reset to default values.")
 
         # 2. Clear sensitive/unique fields in device.json

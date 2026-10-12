@@ -63,6 +63,10 @@ nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}"
 register_task = None
 pipeline_manager = PipelineManager(CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL)
 socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
+
+def set_api_key(value):
+    global API_KEY
+    API_KEY = value
 # rtsp_urls = [
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",

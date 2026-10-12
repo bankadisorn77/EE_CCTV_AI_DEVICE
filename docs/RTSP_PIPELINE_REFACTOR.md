@@ -8,7 +8,8 @@
 - Per-camera queues retain only the latest pending frame.
 - Shared YOLO inference is serialized while camera capture stays independent.
 - Debug image writes are disabled by default; set `EE_CCTV_SAVE_DEBUG_IMAGES=1` to enable.
-- Alarm HTTP uses one reusable client with explicit timeouts.
+- Alarm delivery is moved to a bounded queue with a reusable HTTP client; slow webserver calls no longer stall detection workers.
+- `GET /status` reports pipeline state, per-camera connectivity/frame freshness and alert queue counters.
 - The committed device API key is cleared in this branch. Rotate/revoke the old key; this does not erase it from Git history.
 
 ## Must validate on Jetson
@@ -19,9 +20,9 @@
 5. Repeat start/stop and monitor threads, RAM, GPU memory, FPS and latency over a multi-hour run.
 6. Verify the server's registration API issues a new key when `apiKey` is blank.
 7. Run `python -m compileall src` and hardware-in-the-loop tests.
+8. Confirm the webserver alarm endpoint accepts the existing payload and monitor `GET /status` while the webserver is unavailable.
 
 ## Next slices
-- Add an alert queue/service so slow webserver calls cannot stall detection workers.
-- Expose camera/pipeline health status.
-- Split routes, configuration, pipeline orchestration, camera readers, inference scheduling, detection rules and alert delivery into separate modules.
-- Add mocked unit tests and a four-stream RTSP soak test.
+- Split routes, configuration, pipeline orchestration, camera readers, inference scheduling, detection rules and alert delivery into dedicated modules.
+- Add mocked tests for alert queue overflow, task cancellation and pipeline lifecycle.
+- Add a four-stream RTSP soak test on the target Jetson.

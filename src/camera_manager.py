@@ -7,7 +7,6 @@ import json
 import atexit
 import time
 import base64
-import httpx
 # Removed Triton gRPC import
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.ee_cctv_ai import model_process_ultralytics as model_process
 from src.ee_cctv_ai.acquistion import Acquisition
+from src.ee_cctv_ai.alert_service import AlertService
 from turbojpeg import TurboJPEG
 
 class CCTV_AI_Ultralytics: 
@@ -49,7 +49,7 @@ class CCTV_AI_Ultralytics:
 
         # Bound per-camera latency and memory: only keep the freshest pending frame.
         self.frame_queues = {f"cam{i+1}": asyncio.Queue(maxsize=1) for i in range(len(rtsp_urls))}
-        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
+        self.alert_service = AlertService(self.nodeJS_URL, self.API_KEY)
 
         # Readers reconnect independently; one camera must not abort pipeline startup.
         self.cameras = [
@@ -148,6 +148,7 @@ class CCTV_AI_Ultralytics:
     async def run(self):
         self.start_time = time.time()
         print("CCTV_AI System Running (Ultralytics Mode)...")
+        await self.alert_service.start()
         self._tasks = [
             asyncio.create_task(self.producer(i), name=f"camera-producer-{i+1}")
             for i in range(len(self.cameras))
@@ -159,7 +160,7 @@ class CCTV_AI_Ultralytics:
             await asyncio.gather(*self._tasks)
         finally:
             self.cleanup()
-            await asyncio.gather(self.http_client.aclose(), return_exceptions=True)
+            await self.alert_service.stop()
 
     async def alarm_detect(self, camid, detection_class, message, confidence, image):
         image_base64_str = ""
@@ -178,16 +179,8 @@ class CCTV_AI_Ultralytics:
             "imageBase64": f"data:image/jpeg;base64,{image_base64_str}" if image_base64_str else None
         }
 
-        try:
-            res = await self.http_client.post(
-                f"{self.nodeJS_URL}/api/device/alarm",
-                headers={"Content-Type": "application/json", "x-api-key": self.API_KEY},
-                json=payload,
-            )
-            if res.status_code != 200:
-                print(f"Alarm failed: {res.status_code} - {res.text}")
-        except Exception as e:
-            print(f"Alarm error: {e}")
+        # Queue the alert and return immediately; delivery must not block detection.
+        await self.alert_service.enqueue(payload)
         return payload
     
     async def logic(self, image, cam_id, cam_data):

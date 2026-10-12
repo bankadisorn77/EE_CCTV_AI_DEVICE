@@ -115,6 +115,29 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/test")
 async def test_endpoint():
     return {"message": "API is working!"}
+
+
+@app.get("/status")
+async def get_pipeline_status():
+    running = cctv_task is not None and not cctv_task.done()
+    cameras = []
+    alert_status = None
+    if cctv_ai is not None:
+        for camera in cctv_ai.cameras:
+            last_frame = camera.last_frame_at
+            cameras.append({
+                "id": camera.name,
+                "connected": camera.connected,
+                "frameId": camera.frame_id,
+                "frameAgeSeconds": round(max(0.0, time() - last_frame), 2) if last_frame else None,
+            })
+        alert_status = cctv_ai.alert_service.status()
+    return {
+        "running": running,
+        "cameraCount": len(cameras),
+        "cameras": cameras,
+        "alerts": alert_status,
+    }
 @app.post("/control")
 async def control_ai(control: AIcontoll):
     global cctv_ai, cctv_task

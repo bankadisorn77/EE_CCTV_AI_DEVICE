@@ -17,6 +17,7 @@ class Acquisition:
         self.stop_process = False
         self.t = None
         self.frame_id = 0
+        self.last_frame_at = None
         self.connected = False
         self._reconnect_count = 0
 
@@ -120,6 +121,7 @@ class Acquisition:
             with self._lock:
                 self._image = frame
                 self.frame_id += 1
+                self.last_frame_at = time.time()
             self.connected = True
         cap = self.cap
         self.cap = None

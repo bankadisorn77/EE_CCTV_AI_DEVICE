@@ -9,9 +9,7 @@ import socketio
 import uvicorn
 import signal
 from contextlib import asynccontextmanager
-import httpx
 import json
-import psutil
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -43,11 +41,12 @@ device_config = load_device_config()
 
 from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI 
 from src.shere_data import data
-from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
 from src.ee_cctv_ai.schemas import AIControlRequest
 from src.ee_cctv_ai.config_store import load_config, save_config
 from src.ee_cctv_ai.pipeline_manager import PipelineManager
+from src.ee_cctv_ai.device_service import register_device
+from src.ee_cctv_ai.status_service import get_jetson_stats
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -78,7 +77,19 @@ pipeline_manager = PipelineManager(CCTV_AI, rtsp_urls, shared_data, lambda: API_
 async def lifespan(app: FastAPI):
     global register_task
     background_tasks = []
-    register_task = asyncio.create_task(register_device(), name="device-registration")
+    register_task = asyncio.create_task(
+        register_device(
+            DEVICE_CONFIG_PATH,
+            init_cctv_ai_frame,
+            rtsp_urls,
+            nodeJS_URL,
+            get_network_info=get_lan_network_info,
+            get_api_key=lambda: API_KEY,
+            set_api_key=set_api_key,
+            socket_client=sio,
+        ),
+        name="device-registration",
+    )
     background_tasks.append(register_task)
     background_tasks.append(asyncio.create_task(connect_socketio(), name="socketio-connection"))
     background_tasks.append(asyncio.create_task(send_status("stanby"), name="status-standby"))
@@ -247,13 +258,18 @@ async def connect_socketio():
             await asyncio.sleep(5)
 
 # send status to nodeJS via SocketIO
+def set_api_key(value):
+    global API_KEY
+    API_KEY = value
+
+
 async def send_status(time='stanby'):
     global API_KEY ,LIFE
     if time == 'now':
         LIFE = shared_data.get_LIFE()
         if API_KEY and sio.connected:
             try:
-                await sio.emit('heartbeat', get_jetson_stats(LIFE))
+                await sio.emit('heartbeat', get_jetson_stats(LIFE, shared_data))
             except Exception as e:
                 print(f"Failed to send status via SocketIO: {e}")
         elif API_KEY:
@@ -263,7 +279,7 @@ async def send_status(time='stanby'):
             LIFE = shared_data.get_LIFE()
             if API_KEY and sio.connected:
                 try:
-                    await sio.emit('heartbeat', get_jetson_stats(LIFE))
+                    await sio.emit('heartbeat', get_jetson_stats(LIFE, shared_data))
                 except Exception as e:
                     print(f"Failed to send status via SocketIO: {e}")
             elif API_KEY:
@@ -294,129 +310,6 @@ def get_jetson_stats(status):
             "aiVersion": "v1.12.3", 
             "activeDevice": shared_data.get_active_device()
         }
-
-async def register_device():
-    global API_KEY, rtsp_urls
-    loop = asyncio.get_running_loop()
-    image_base64_frames = await loop.run_in_executor(None, init_cctv_ai_frame, rtsp_urls)
-    async def reg():
-        print("Device config missing mcId or apiKey")
-        URL = f'{nodeJS_URL}/api/device/register'
-
-        lan_ip, lan_mac = get_lan_network_info()
-
-        device_ip = lan_ip if not device_config.get('ip') else device_config.get('ip')
-        device_mac = lan_mac if not device_config.get('mac') else device_config.get('mac')
-
-        device_config['ip'] = device_ip
-        device_config['mac'] = device_mac
-
-        data = {
-            'mac': device_mac,
-            'ip': device_ip,
-            'frame': image_base64_frames,
-        }
-        
-        async with httpx.AsyncClient() as requests:
-            try:
-                response = await requests.post(url=URL, json=data)
-                if response.status_code == 200:
-                    res_data = response.json()
-                    device_config['apiKey'] = res_data.get('apiKey')
-                    API_KEY = res_data.get('apiKey')
-                    try: 
-                        # เซฟ config พร้อม IP และ MAC ลง device.json
-                        with DEVICE_CONFIG_PATH.open('w') as f:
-                            json.dump(device_config, f, indent=4)
-                        print(f"✅ Device registered: IP={device_ip}, MAC={device_mac}")
-                    except Exception as e:
-                        print(f'Error save file: {e}')        
-                else:
-                    print(f"Register response status: {response.status_code}")
-                    return
-            except Exception as e:
-                print(f'Error register: {e}')
-    while True:
-        try:
-            try:
-                with DEVICE_CONFIG_PATH.open('r') as f:
-                    device_config = json.load(f)
-            except Exception as e:
-                print(f"Device config error: {e}")
-                device_config = {}
-            saved_api_key = device_config.get('apiKey')
-            if not saved_api_key:
-                await reg()
-            else:
-                try:
-                    async with httpx.AsyncClient() as requests:
-                        headers = {
-                            "Content-Type": "application/json",
-                            "x-api-key": saved_api_key
-                        }
-                        res = await requests.get(f"{nodeJS_URL}/api/device/check-api-key", headers=headers)
-                        
-                        if res.status_code == httpx.codes.OK:
-                            API_KEY = saved_api_key
-                            try:
-                                async with httpx.AsyncClient() as requests:
-                                    headers = {
-                                        "Content-Type": "application/json",
-                                        "x-api-key": API_KEY
-                                    }
-                                    payload = {'frame':image_base64_frames}
-                                    res = await requests.post(f"{nodeJS_URL}/api/device/re-captureImage", headers=headers,json=payload)
-                                    if res.status_code == httpx.codes.OK:
-                                        print('✅ Re-capture Image success')
-                                    else:
-                                        print('Re-capture Image failed')
-                            except Exception as e :
-                                print(f'Re-capture Image failed:{e}')
-                            print("✅ Device already registered with valid API key.")
-                        else:
-                            print("⚠️ API key invalid (Server rejected), re-registering device.")
-                            await reg()
-
-                except Exception as e:
-               
-                    print(f"Cannot reach NodeJS Server to verify API Key: {e}")
-                    print("Network is down, using cached API Key to start AI locally.")
-    
-                    API_KEY = saved_api_key 
-
-         
-            print(f"API key configured: {bool(API_KEY)}")
-            if API_KEY:
-                if sio.connected:
-                    try:
-                        await sio.emit("register-device-status", {"apiKey": API_KEY})
-                    except Exception as emit_error:
-                        print(f"SocketIO device registration emit failed: {emit_error}")
-                print("Registration sequence passed. Starting system...")
-                break 
-            
-    
-            print("Retrying registration in 5 seconds...")
-            await asyncio.sleep(5)
-
-        except Exception as e:
-            print(f"Fatal Error in register_device: {e}")
-            print("Retrying in 5 seconds...")
-            await asyncio.sleep(5)
-
-def runserverTriton():
-        
-        return {"message": "AI is already running"}
-# check divice are Exit
-def check_device():
-    try:
-        with DEVICE_CONFIG_PATH.open('r') as f:
-                print("Device config Exit")
-    except Exception as e:
-        with DEVICE_CONFIG_PATH.open('w') as f:
-            json.dump(load_device_config(), f, indent=4)
-            print("Device config created with default values.")
-
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=5000)

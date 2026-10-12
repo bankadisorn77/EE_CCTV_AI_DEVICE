@@ -40,12 +40,10 @@ device_config = load_device_config()
 from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI 
 from src.shere_data import data
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
-from src.ee_cctv_ai.schemas import AIControlRequest
-from src.ee_cctv_ai.config_store import load_config, save_config
 from src.ee_cctv_ai.pipeline_manager import PipelineManager
 from src.ee_cctv_ai.device_service import register_device
-from src.ee_cctv_ai.status_service import get_jetson_stats
 from src.ee_cctv_ai.getip import get_lan_network_info
+from src.ee_cctv_ai.socket_service import SocketStatusService
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -64,6 +62,7 @@ LIFE = None
 nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}")
 register_task = None
 pipeline_manager = PipelineManager(CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL)
+socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
 # rtsp_urls = [
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
@@ -90,9 +89,8 @@ async def lifespan(app: FastAPI):
         name="device-registration",
     )
     background_tasks.append(register_task)
-    background_tasks.append(asyncio.create_task(connect_socketio(), name="socketio-connection"))
-    background_tasks.append(asyncio.create_task(send_status("stanby"), name="status-standby"))
-    background_tasks.append(asyncio.create_task(send_status("now"), name="status-now"))
+    background_tasks.append(asyncio.create_task(socket_service.connect_forever(), name="socketio-connection"))
+    background_tasks.append(asyncio.create_task(socket_service.heartbeat_loop(), name="status-heartbeat"))
     try:
         yield
     finally:
@@ -106,8 +104,6 @@ async def lifespan(app: FastAPI):
    
 
 
-app = FastAPI(lifespan=lifespan)
-
 from src.api.routes import create_router
 
 app = FastAPI(lifespan=lifespan)
@@ -119,75 +115,10 @@ app.include_router(
         device_config_path=DEVICE_CONFIG_PATH,
         rtsp_urls=rtsp_urls,
         initial_frame_capture=init_cctv_ai_frame,
-        send_status=send_status,
+        send_status=socket_service.send_status_now,
     )
 )
 
-# ----------------------------------------------socketio events-----------------------------------------------------------
-@sio.event
-async def connect():
-    print("SocketIO connected")
-    if API_KEY:
-        await sio.emit("register-device-status", {"apiKey": API_KEY})
-    else:
-        print("SocketIO connected before device registration; registration will be emitted when the API key is ready.")
-@sio.event
-async def disconnect():
-    print("SocketIO disconnected")
-@sio.event
-async def connect_error(data):
-    print("SocketIO connect_error:", data)
-    
-# ----------------------------------------------function-----------------------------------------------------------
-
-async def connect_socketio():
-    while True:
-        if sio.connected:
-            break
-        try:
-            print(f" Attempting to connect SocketIO to {nodeJS_URL}...")
-            await sio.connect(nodeJS_URL, wait_timeout=10)
-            print("SocketIO connected successfully!")
-            break
-        except Exception as e:
-            print(f"SocketIO connection failed: {e!r}")
-            try:
-                await sio.disconnect()   
-            except Exception:
-                pass
-            print("Retrying in 5 seconds...")
-            await asyncio.sleep(5)
-
-# send status to nodeJS via SocketIO
-def set_api_key(value):
-    global API_KEY
-    API_KEY = value
-
-
-async def send_status(time='stanby'):
-    global API_KEY ,LIFE
-    if time == 'now':
-        LIFE = shared_data.get_LIFE()
-        if API_KEY and sio.connected:
-            try:
-                await sio.emit('heartbeat', get_jetson_stats(LIFE, shared_data))
-            except Exception as e:
-                print(f"Failed to send status via SocketIO: {e}")
-        elif API_KEY:
-            print("SocketIO is not connected; skipping heartbeat.")
-    else:
-        while True:
-            LIFE = shared_data.get_LIFE()
-            if API_KEY and sio.connected:
-                try:
-                    await sio.emit('heartbeat', get_jetson_stats(LIFE, shared_data))
-                except Exception as e:
-                    print(f"Failed to send status via SocketIO: {e}")
-            elif API_KEY:
-                print("SocketIO is not connected; skipping heartbeat.")
-            LIFE = 'inactive'
-            await asyncio.sleep(5)
-       
-
+# Socket.IO service is defined below after runtime dependencies.
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=5000)

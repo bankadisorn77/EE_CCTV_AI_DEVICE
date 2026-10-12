@@ -289,28 +289,5 @@ async def send_status(time='stanby'):
             await asyncio.sleep(5)
        
 
-def get_jetson_stats(status):
-        def read_temp(zone_path):
-            try:
-                with open(zone_path, "r") as f:
-                    return float(f.read().strip()) / 1000.0
-            except:
-                return 0.0
-        cpu_temp = read_temp("/sys/class/thermal/thermal_zone0/temp") 
-        gpu_temp = read_temp("/sys/class/thermal/thermal_zone1/temp")
-        mem = psutil.virtual_memory()
-        mem_used = mem.used // (1024 * 1024)
-        mem_free = mem.available // (1024 * 1024)
-
-        return {
-            "runningStatus": status,
-            "cpuTemp": cpu_temp,
-            "gpuTemp": gpu_temp,
-            "memoryFree": mem_free,
-            "memoryUsed": mem_used,
-            "aiVersion": "v1.12.3", 
-            "activeDevice": shared_data.get_active_device()
-        }
-
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=5000)

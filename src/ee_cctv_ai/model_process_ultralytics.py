@@ -3,6 +3,7 @@ import time
 import numpy as np
 import cv2
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -13,8 +14,14 @@ MODEL = YOLO(str(MODEL_PATH), task="detect")
 cpu_executor = ThreadPoolExecutor(max_workers=4)
 # Shared YOLO/GPU instance: serialize prediction until target-device tests prove
 # concurrent calls are safe and improve throughput.
-_inference_lock = asyncio.Lock()
+_inference_lock = threading.Lock()
 SAVE_DEBUG_IMAGES = os.getenv("EE_CCTV_SAVE_DEBUG_IMAGES", "0").lower() in {"1", "true", "yes"}
+
+
+def _predict_sync(cropped_img, size, conf):
+    """Run the shared YOLO model under a thread lock, independent of asyncio loops."""
+    with _inference_lock:
+        return MODEL.predict(cropped_img, imgsz=size, conf=conf, verbose=False)
 
 def process_image_ultralytics(
     result_obj, img, roi_offset, config_cam, conf=0.5
@@ -66,23 +73,22 @@ async def predict_model(img, config_cam, size=640, conf=0.5):
         img, config_cam, size
     )
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
-        predict_func = partial(MODEL.predict, cropped_img, imgsz=size, conf=conf, verbose=False)
-        async with _inference_lock:
-            prediction_future = loop.run_in_executor(cpu_executor, predict_func)
+        # The lock lives in a worker thread, not an asyncio event loop. This avoids
+        # "Future attached to a different loop" when the pipeline is restarted.
+        prediction_future = loop.run_in_executor(
+            cpu_executor, _predict_sync, cropped_img, size, conf
+        )
+        try:
+            # Do not let cancellation abandon a still-running CUDA inference call.
+            results_obj = await asyncio.shield(prediction_future)
+        except asyncio.CancelledError:
             try:
-                # shield prevents task cancellation from marking the executor future
-                # cancelled while the underlying CUDA inference thread is still running.
-                results_obj = await asyncio.shield(prediction_future)
-            except asyncio.CancelledError:
-                # Keep the model lock until the actual inference finishes. Otherwise a
-                # restarted pipeline could call the shared model concurrently.
-                try:
-                    await asyncio.shield(prediction_future)
-                except Exception:
-                    pass
-                raise
+                await asyncio.shield(prediction_future)
+            except Exception:
+                pass
+            raise
 
         # Extract results [x1, y1, x2, y2, conf, cls]
         results = results_obj[0].boxes.data.cpu().numpy()
@@ -157,7 +163,7 @@ def cv2_preprocess(img, config_cam, size):
     return cropped_img, croped_shape, roi_offset
 
 async def preprocess(image, config_cam, size):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     img, croped_shape, letterbox_info = await loop.run_in_executor(
         cpu_executor, 
         cv2_preprocess, 

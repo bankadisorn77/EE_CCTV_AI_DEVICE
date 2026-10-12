@@ -80,17 +80,18 @@ class Acquisition:
         self.t.start()
 
     def stop(self):
+        # The reader thread must be the only thread that calls read()/release() on
+        # this VideoCapture. Releasing it concurrently with cap.read() can trigger
+        # FFmpeg/libavcodec assertions such as "fctx->async_lock failed".
         self.stop_process = True
-        cap = self.cap
-        self.cap = None
         self.connected = False
-        if cap is not None:
-            try:
-                cap.release()
-            except Exception:
-                pass
         if self.t is not None and self.t.is_alive() and threading.current_thread() is not self.t:
-            self.t.join(timeout=2.0)
+            self.t.join(timeout=5.0)
+            if self.t.is_alive():
+                print(
+                    f"[{self.name}] Reader has not stopped yet; leaving VideoCapture "
+                    "release to the reader thread to avoid a decoder race."
+                )
 
     def _update(self):
         while not self.stop_process:

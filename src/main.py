@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import asyncio
-import base64
 import os
 import sys
 from pathlib import Path
@@ -15,7 +14,6 @@ import json
 import psutil
 from pydantic import BaseModel
 from typing import List
-import cv2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -48,6 +46,7 @@ device_config = load_device_config()
 from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI 
 from src.shere_data import data
 from src.ee_cctv_ai.getip import get_lan_network_info
+from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -425,58 +424,6 @@ async def register_device():
             print(f"Fatal Error in register_device: {e}")
             print("Retrying in 5 seconds...")
             await asyncio.sleep(5)
-
-def init_cctv_ai_frame(rtsp_urls, max_retries=5):
-    attempt = 0
-    while attempt < max_retries:
-        try:
-            initial_frames = {}
-            for i, url in enumerate(rtsp_urls):
-                cam_id = f"cam{i+1}"
-                print(f"Capturing initial frame for {cam_id}...")
-                
-            
-                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-                if cap.isOpened():
-                    success = False
-                   
-                    for _ in range(50):
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            initial_frames[cam_id] = frame
-                            print(f"✅ Success: {cam_id} frame captured.")
-                            success = True
-                            break 
-                            
-                    if not success:
-                        print(f"❌ Error: Cannot read frame from {cam_id} (Timeout waiting for Keyframe).")
-                        initial_frames[cam_id] = None
-                        
-                    cap.release()
-                else:
-                    print(f"❌ Error: Cannot open stream for {cam_id}.")
-                    initial_frames[cam_id] = None
-
-            image_base64_frames = {}
-            for cam_id, frame in initial_frames.items():
-                if frame is not None:
-                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-                    _, buffer = cv2.imencode('.jpg', frame, encode_param)
-                    image_base64_frames[cam_id] = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
-                else:
-                    image_base64_frames[cam_id] = None
-                    
-            return image_base64_frames 
-
-        except Exception as e:
-            attempt += 1
-            print(f"Error in init_cctv_ai_frame: {e}")
-            print(f"Retrying... ({attempt}/{max_retries}) in 5 seconds")
-            await asyncio.sleep(5) 
-            
-    print("FATAL: Failed to initialize CCTV frames after multiple attempts.")
-    return None
-
 
 async def run_cctv_ai():
     global LIFE, cctv_ai

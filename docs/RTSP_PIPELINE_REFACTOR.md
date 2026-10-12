@@ -2,7 +2,7 @@
 
 ## Included in this increment
 - FastAPI startup no longer waits indefinitely for device registration.
-- Initial frame capture runs in an executor, not on the FastAPI event loop.
+- Initial frame capture is isolated in `frame_capture.py` and runs in an executor, not on the FastAPI event loop.
 - Start/stop tracks the pipeline task, awaits cancellation, and cleans up from `finally`.
 - Camera acquisition opens lazily and reconnects independently; one failed camera does not abort other cameras.
 - Per-camera queues retain only the latest pending frame.

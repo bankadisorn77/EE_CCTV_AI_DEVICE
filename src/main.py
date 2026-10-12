@@ -3,11 +3,9 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from time import time
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 import socketio
 import uvicorn
-import signal
 from contextlib import asynccontextmanager
 import json
 
@@ -110,119 +108,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# -------------------------------------Endpoints-----------------------------------------------
-@app.get("/test")
-async def test_endpoint():
-    return {"message": "API is working!"}
+from src.api.routes import create_router
 
+app = FastAPI(lifespan=lifespan)
+app.include_router(
+    create_router(
+        pipeline_manager=pipeline_manager,
+        shared_data=shared_data,
+        config_path=CONFIG_PATH,
+        device_config_path=DEVICE_CONFIG_PATH,
+        rtsp_urls=rtsp_urls,
+        initial_frame_capture=init_cctv_ai_frame,
+        send_status=send_status,
+    )
+)
 
-@app.get("/status")
-async def get_pipeline_status():
-    running = pipeline_manager.running
-    cameras = []
-    alert_status = None
-    pipeline = pipeline_manager.pipeline
-    if pipeline is not None:
-        for camera in pipeline.cameras:
-            last_frame = camera.last_frame_at
-            cameras.append({
-                "id": camera.name,
-                "connected": camera.connected,
-                "frameId": camera.frame_id,
-                "frameAgeSeconds": round(max(0.0, time() - last_frame), 2) if last_frame else None,
-            })
-        alert_status = pipeline.alert_service.status()
-    return {
-        "running": running,
-        "cameraCount": len(cameras),
-        "cameras": cameras,
-        "alerts": alert_status,
-    }
-@app.post("/control")
-async def control_ai(control: AIControlRequest):
-    roi = control.roi
-    confidence_threshold = control.confidence_threshold
-
-    config_data = load_config(CONFIG_PATH)
-
-    if roi is not None:
-        config_data["cameras"] = roi
-        shared_data.set_config(roi)
-
-    if confidence_threshold is not None:
-        config_data["confidence_threshold"] = confidence_threshold
-        shared_data.set_confidence_threshold(confidence_threshold)
-
-    save_config(config_data, CONFIG_PATH)
-
-    # print(f"Control AI: action={control.action}, roi={roi}, confidence_threshold={confidence_threshold}")
-    if control.action == "start":
-        started = await pipeline_manager.start()
-        if not started:
-            return {"message": "AI is already running"}
-        await send_status("now")
-        return {"message": "AI started"}
-    if control.action == "stop":
-        await pipeline_manager.stop()
-        await send_status("now")
-        return {"message": "AI stopped"}
-    return {"message": "Unsupported action", "action": control.action}
-    
-@app.get("/initial-frames")
-async def get_initial_frames():
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, init_cctv_ai_frame, rtsp_urls)
-@app.post('/reset')
-async def reset():
-    try:
-        # 1. Reset config.json to its default state
-        default_config = {
-            "cameras": [
-                {
-                    "name": f"cam{i+1}",
-                    "machineCount": 0,
-                    "roi": {"row1": None, "col1": None, "row2": None, "col2": None}
-                }
-                for i in range(len(rtsp_urls))
-            ],
-            "confidence_threshold": 0.5
-        }
-        save_config(default_config, CONFIG_PATH)
-        print("config.json has been reset to default values.")
-
-        # 2. Clear sensitive/unique fields in device.json
-        try:
-            with DEVICE_CONFIG_PATH.open('r') as f:
-                device_conf = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            device_conf = {}
-
-        device_conf['ip'] = ""
-        device_conf['mac'] = ""
-        device_conf['apiKey'] = ""
-        
-        with DEVICE_CONFIG_PATH.open('w') as f:
-            json.dump(device_conf, f, indent=4)
-        print("ip, mac, and apiKey in device.json have been cleared.")
-
-    except Exception as e:
-        print(f"Error during reset file operations: {e}")
-        return Response(status_code=500, content=f"Error during reset: {e}")
-
-    # 3. Schedule a graceful shutdown
-    async def shutdown():
-        await asyncio.sleep(1)  # Allow time for the HTTP response to be sent
-        print("Shutting down application...")
-        os.kill(os.getpid(), signal.SIGINT)
-
-    asyncio.create_task(shutdown())
-    
-    return {"message": "Device reset successfully. Shutting down."}
-
-@app.post('/restart')
-async def restart():
-    return {"success": True}
-    
 # ----------------------------------------------socketio events-----------------------------------------------------------
 @sio.event
 async def connect():

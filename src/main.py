@@ -47,6 +47,7 @@ from src.ee_cctv_ai.config_store import load_config, save_config
 from src.ee_cctv_ai.pipeline_manager import PipelineManager
 from src.ee_cctv_ai.device_service import register_device
 from src.ee_cctv_ai.status_service import get_jetson_stats
+from src.ee_cctv_ai.getip import get_lan_network_info
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 

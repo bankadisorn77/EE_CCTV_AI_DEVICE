@@ -12,8 +12,6 @@ from contextlib import asynccontextmanager
 import httpx
 import json
 import psutil
-from pydantic import BaseModel
-from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -47,6 +45,7 @@ from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI
 from src.shere_data import data
 from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
+from src.ee_cctv_ai.schemas import AIControlRequest
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -66,11 +65,6 @@ nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}"
 cctv_task = None
 cctv_ai = None
 register_task = None
-class AIcontoll(BaseModel):
-    action: str
-    roi: List[dict] = None
-    confidence_threshold: float = None
-
 # rtsp_urls = [
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
 #     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
@@ -138,7 +132,7 @@ async def get_pipeline_status():
         "alerts": alert_status,
     }
 @app.post("/control")
-async def control_ai(control: AIcontoll):
+async def control_ai(control: AIControlRequest):
     global cctv_ai, cctv_task
     roi = control.roi
     confidence_threshold = control.confidence_threshold

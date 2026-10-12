@@ -67,12 +67,6 @@ socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_K
 def set_api_key(value):
     global API_KEY
     API_KEY = value
-# rtsp_urls = [
-#     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
-#     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
-#     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101",
-#     "rtsp://admin:Utac12345@192.168.1.64/Streaming/Channels/101"
-# ]
 
 #  -----------------------------FastAPI app and lifespan----------------------------------------------
 @asynccontextmanager

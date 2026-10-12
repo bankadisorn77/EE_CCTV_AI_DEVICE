@@ -79,8 +79,7 @@ class CCTV_AI_Ultralytics:
         last_frame_id = -1
 
         while not self.stop_process:
-            frame = camera.image
-            frame_id = camera.frame_id
+            frame, frame_id = camera.latest_frame()
             if frame is not None and frame_id != last_frame_id:
                 last_frame_id = frame_id
                 if queue.full():

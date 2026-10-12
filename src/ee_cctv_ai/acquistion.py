@@ -26,6 +26,12 @@ class Acquisition:
         with self._lock:
             return None if self._image is None else self._image.copy()
 
+    def latest_frame(self):
+        """Return an image copy and its matching frame id atomically."""
+        with self._lock:
+            image = None if self._image is None else self._image.copy()
+            return image, self.frame_id
+
     def initial(self):
         if self.cap is not None:
             return

@@ -27,6 +27,17 @@ class AcquisitionTests(unittest.TestCase):
             video_capture.assert_not_called()
             self.assertFalse(camera.connected)
             self.assertEqual(camera.frame_id, 0)
+            self.assertEqual(camera.latest_frame(), (None, 0))
+
+    def test_latest_frame_snapshot_is_copied(self):
+        camera = Acquisition("rtsp://example.invalid/stream", key="cam1")
+        camera._image = bytearray(b"frame")
+        camera.frame_id = 4
+        frame, frame_id = camera.latest_frame()
+        self.assertEqual(frame_id, 4)
+        self.assertEqual(frame, bytearray(b"frame"))
+        frame[0] = ord("X")
+        self.assertEqual(camera._image, bytearray(b"frame"))
 
     def test_failed_open_releases_capture(self):
         fake = FakeCapture(opened=False)

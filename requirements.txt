@@ -1,23 +1,35 @@
---extra-index-url https://download.pytorch.org/whl/cu121
+# =====================================================================
+# Jetson JetPack 5.1.3 (L4T 35.5.0) / Python 3.8 / aarch64
+#
+# ติดตั้ง torch และ torchvision ด้วยมือก่อน (ดูขั้นตอนด้านล่าง) แล้วค่อยรัน
+#   pip install -r requirements.txt
+#
+# 1) torch (wheel ของ NVIDIA สำหรับ JetPack 5):
+#    pip install --no-cache https://developer.download.nvidia.com/compute/redist/jp/v512/pytorch/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl
+#
+# 2) torchvision: build จาก source ให้ตรงกับ torch 2.1 (v0.16.1)
+#    git clone --branch v0.16.1 https://github.com/pytorch/vision torchvision
+#    cd torchvision && export BUILD_VERSION=0.16.1 && python3 setup.py install
+#
+# 3) system lib สำหรับ PyTurboJPEG:
+#    sudo apt install libturbojpeg
+#
+
 
 # Core ML / vision
-numpy<2.0
-opencv-python
+numpy==1.23.5
 ultralytics
-
-# Torch 
-torch
-torchvision
-torchaudio
 
 # API / server
 fastapi
-python-socketio[asyncio_client]
+# python-engineio 4.13+ ต้องใช้ aiohttp>=3.11 (aiohttp.ClientWSTimeout) ซึ่งไม่รองรับ Python 3.8
+python-socketio[asyncio_client]>=5.11,<5.17
+python-engineio>=4.9,<4.13
 aiohttp
 uvicorn[standard]
 httpx
 psutil
 pydantic>=2.0,<3.0
 
-# JPEG decoding support (Downgraded to prevent libjpeg-turbo conflicts on Linux)
+# JPEG decoding support (ต้องมี libturbojpeg ในระบบ)
 PyTurboJPEG<2.0

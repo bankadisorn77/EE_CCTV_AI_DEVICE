@@ -47,18 +47,20 @@ class Acquisition:
                 print(f"[{self.name}] ERROR: File NOT FOUND at: {abs_path}")
             else:
                 print(f"[{self.name}] File exists at: {abs_path}")
-
+                
             if platform.system() == 'Linux' and platform.machine() == 'aarch64':
                 pipeline = (
-                    f"filesrc location={abs_path} ! "
-                    f"qtdemux ! h264parse ! nvv4l2decoder ! "
+                    f"filesrc location=\"{abs_path}\" ! "
+                    f"qtdemux name=d d.video_0 ! queue ! h264parse ! nvv4l2decoder ! "
                     f"nvvidconv ! video/x-raw, format=BGRx ! "
                     f"videoconvert ! video/x-raw, format=BGR ! "
                     f"appsink drop=true sync=false max-buffers=1"
                 )
                 self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-            else:
-                self.cap = cv2.VideoCapture(abs_path, cv2.CAP_FFMPEG)
+
+            if self.cap is None or not self.cap.isOpened():
+                print(f"[{self.name}] Warning: GStreamer pipeline failed or not supported in this OpenCV build. Falling back to default VideoCapture...")
+                self.cap = cv2.VideoCapture(abs_path)
         else:
             self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 

@@ -14,11 +14,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ee_cctv_ai import model_process_ultralytics as model_process # USE ULTRALYTICS
+from src.ee_cctv_ai import model_process_ultralytics as model_process
 from src.ee_cctv_ai.acquistion import Acquisition
 from turbojpeg import TurboJPEG
 
-class CCTV_AI_Ultralytics: # Renamed class
+class CCTV_AI_Ultralytics: 
     def __init__(self, rtsp_urls, shared_data, API_KEY, nodeJS_URL):
         self.stop_process = False
         self.shared_data = shared_data

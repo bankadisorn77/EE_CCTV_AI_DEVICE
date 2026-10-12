@@ -45,8 +45,9 @@ def load_device_config():
 
 device_config = load_device_config()
 
-from src.camera_manager_ultralytics import CCTV_AI_Ultralytics as CCTV_AI # USE ULTRALYTICS
+from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI 
 from src.shere_data import data
+from src.ee_cctv_ai.getip import get_lan_network_info
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -210,20 +211,27 @@ async def connect():
 @sio.event
 async def disconnect():
     print("SocketIO disconnected")
+@sio.event
+async def connect_error(data):
+    print("SocketIO connect_error:", data)
     
 # ----------------------------------------------function-----------------------------------------------------------
 
 async def connect_socketio():
-    global API_KEY
     while True:
+        if sio.connected:
+            break
         try:
-            if not sio.connected:
-                print(f" Attempting to connect SocketIO to {nodeJS_URL}...")
-                await sio.connect(nodeJS_URL)
-                print("SocketIO connected successfully!")
-                break 
+            print(f" Attempting to connect SocketIO to {nodeJS_URL}...")
+            await sio.connect(nodeJS_URL, wait_timeout=10)
+            print("SocketIO connected successfully!")
+            break
         except Exception as e:
-            print(f"SocketIO connection failed: {e}")
+            print(f"SocketIO connection failed: {e!r}")
+            try:
+                await sio.disconnect()   
+            except Exception:
+                pass
             print("Retrying in 5 seconds...")
             await asyncio.sleep(5)
 
@@ -280,32 +288,42 @@ async def register_device():
     global API_KEY, rtsp_urls
     image_base64_frames = init_cctv_ai_frame(rtsp_urls)
     async def reg():
-            global API_KEY
-            print("Device config missing mcId or apiKey")
-            URL = f'{nodeJS_URL}/api/device/register'
-            data ={
-                'mac':device_config.get('mac'),
-                'ip':device_config.get('ip'),
-                'frame': image_base64_frames,
-            }
-            async with httpx.AsyncClient() as requests:
-                try:
-                    response = await requests.post(url=URL,json=data)
-                    if response.status_code == 200:
-                        res_data = response.json()
-                        # device_config['mcId'] = res_data.get('mcId')
-                        device_config['apiKey'] = res_data.get('apiKey')
-                        API_KEY = res_data.get('apiKey')
-                        try: 
-                            with DEVICE_CONFIG_PATH.open('w') as f:
-                                    json.dump(device_config, f, indent=4)
-                        except Exception as e:
-                            print(f'Error seve file : {e}')        
-                    else:
-                        print(response.status_code)
-                        return
-                except Exception as e:
-                    print(f'Error regsiter:{e}')
+        print("Device config missing mcId or apiKey")
+        URL = f'{nodeJS_URL}/api/device/register'
+
+        lan_ip, lan_mac = get_lan_network_info()
+
+        device_ip = lan_ip if not device_config.get('ip') else device_config.get('ip')
+        device_mac = lan_mac if not device_config.get('mac') else device_config.get('mac')
+
+        device_config['ip'] = device_ip
+        device_config['mac'] = device_mac
+
+        data = {
+            'mac': device_mac,
+            'ip': device_ip,
+            'frame': image_base64_frames,
+        }
+        
+        async with httpx.AsyncClient() as requests:
+            try:
+                response = await requests.post(url=URL, json=data)
+                if response.status_code == 200:
+                    res_data = response.json()
+                    device_config['apiKey'] = res_data.get('apiKey')
+                    API_KEY = res_data.get('apiKey')
+                    try: 
+                        # เซฟ config พร้อม IP และ MAC ลง device.json
+                        with DEVICE_CONFIG_PATH.open('w') as f:
+                            json.dump(device_config, f, indent=4)
+                        print(f"✅ Device registered: IP={device_ip}, MAC={device_mac}")
+                    except Exception as e:
+                        print(f'Error save file: {e}')        
+                else:
+                    print(f"Register response status: {response.status_code}")
+                    return
+            except Exception as e:
+                print(f'Error register: {e}')
     while True:
         try:
             try:
@@ -450,4 +468,4 @@ def check_device():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=webserver_host, port=5000)
+    uvicorn.run("main:app", host="0.0.0.0", port=5000)

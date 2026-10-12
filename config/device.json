@@ -5,9 +5,9 @@
         "test/C03.mp4",
         "test/C04.mp4"
     ],
-    "webserver_url": "10.153.90.135",
+    "webserver_url": "169.254.26.65",
     "webserver_port": 5050,
-    "ip": "10.153.90.135",
-    "mac": "08:71:90:f2:0a:6c",
-    "apiKey": "9486c3af9d5f794c2632c6a2eed7a4cc4a54a2a3de2a7db3c7dd1ab7268335df"
+    "ip": "169.254.165.145",
+    "mac": "74:25:54:dc:fe:82",
+    "apiKey": "809033d6cefec3c6c1be45809ec86ba4d5235bee6e5326e0bbaf4281d4ec3849"
 }

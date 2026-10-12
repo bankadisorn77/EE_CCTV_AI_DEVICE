@@ -4,19 +4,19 @@
             "name": "cam1",
             "machineCount": 3,
             "roi": {
-                "col1": 502,
-                "row1": 312,
-                "col2": 1846,
-                "row2": 1078
+                "col1": 492,
+                "row1": 268,
+                "col2": 1834,
+                "row2": 1076
             }
         },
         {
             "name": "cam2",
             "machineCount": 4,
             "roi": {
-                "col1": 160,
-                "row1": 294,
-                "col2": 1780,
+                "col1": 130,
+                "row1": 304,
+                "col2": 1804,
                 "row2": 1078
             }
         },
@@ -24,22 +24,22 @@
             "name": "cam3",
             "machineCount": 3,
             "roi": {
-                "col1": 250,
-                "row1": 256,
-                "col2": 1310,
-                "row2": 844
+                "col1": 258,
+                "row1": 270,
+                "col2": 1350,
+                "row2": 868
             }
         },
         {
             "name": "cam4",
             "machineCount": 4,
             "roi": {
-                "col1": 436,
-                "row1": 248,
-                "col2": 1796,
-                "row2": 854
+                "col1": 452,
+                "row1": 290,
+                "col2": 1812,
+                "row2": 874
             }
         }
     ],
-    "confidence_threshold": 0.8
+    "confidence_threshold": 0.7
 }

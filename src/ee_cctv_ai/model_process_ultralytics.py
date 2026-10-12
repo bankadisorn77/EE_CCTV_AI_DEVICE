@@ -70,7 +70,19 @@ async def predict_model(img, config_cam, size=640, conf=0.5):
     try:
         predict_func = partial(MODEL.predict, cropped_img, imgsz=size, conf=conf, verbose=False)
         async with _inference_lock:
-            results_obj = await loop.run_in_executor(cpu_executor, predict_func)
+            prediction_future = loop.run_in_executor(cpu_executor, predict_func)
+            try:
+                # shield prevents task cancellation from marking the executor future
+                # cancelled while the underlying CUDA inference thread is still running.
+                results_obj = await asyncio.shield(prediction_future)
+            except asyncio.CancelledError:
+                # Keep the model lock until the actual inference finishes. Otherwise a
+                # restarted pipeline could call the shared model concurrently.
+                try:
+                    await asyncio.shield(prediction_future)
+                except Exception:
+                    pass
+                raise
 
         # Extract results [x1, y1, x2, y2, conf, cls]
         results = results_obj[0].boxes.data.cpu().numpy()

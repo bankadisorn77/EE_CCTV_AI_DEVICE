@@ -233,7 +233,10 @@ async def restart():
 @sio.event
 async def connect():
     print("SocketIO connected")
-    await sio.emit('register-device-status', {'apiKey': API_KEY})
+    if API_KEY:
+        await sio.emit("register-device-status", {"apiKey": API_KEY})
+    else:
+        print("SocketIO connected before device registration; registration will be emitted when the API key is ready.")
 @sio.event
 async def disconnect():
     print("SocketIO disconnected")
@@ -402,6 +405,11 @@ async def register_device():
          
             print(f"API key configured: {bool(API_KEY)}")
             if API_KEY:
+                if sio.connected:
+                    try:
+                        await sio.emit("register-device-status", {"apiKey": API_KEY})
+                    except Exception as emit_error:
+                        print(f"SocketIO device registration emit failed: {emit_error}")
                 print("Registration sequence passed. Starting system...")
                 break 
             

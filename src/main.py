@@ -26,9 +26,9 @@ def load_device_config():
         "rstp_url": ["", "", "", ""],
         "webserver_url": "localhost",
         "webserver_port": 8000,
-        "ip": "127.0.0.1",
-        "mac": "00:00:00:00:00:00",
-        "apiKey": "your_api_key_here",
+        "ip": "",
+        "mac": "",
+        "apiKey": "",
     }
     try:
         with DEVICE_CONFIG_PATH.open("r") as config_file:
@@ -400,7 +400,7 @@ async def register_device():
                     API_KEY = saved_api_key 
 
          
-            print(f'Current API_KEY is {API_KEY}')
+            print(f"API key configured: {bool(API_KEY)}")
             if API_KEY:
                 print("Registration sequence passed. Starting system...")
                 break 

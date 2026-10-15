@@ -1,13 +1,13 @@
 {
     "rstp_url": [
-        "test/C01.mp4",
-        "test/C02.mp4",
-        "test/C03.mp4",
-        "test/C04.mp4"
+        "rtsp://169.254.26.65:8554/cam1",
+        "rtsp://169.254.26.65:8554/cam1",
+        "rtsp://169.254.26.65:8554/cam1",
+        "rtsp://169.254.26.65:8554/cam1"
     ],
     "webserver_url": "169.254.26.65",
     "webserver_port": 5050,
     "ip": "169.254.165.145",
     "mac": "74:25:54:dc:fe:82",
-    "apiKey": ""
+    "apiKey": "8c4368514e5808dbf04b9706bd25fc3a0d413cf676c87688baab5f1c94db4c15"
 }

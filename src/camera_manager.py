@@ -56,6 +56,16 @@ class CCTV_AI_Ultralytics:
             Acquisition(rtsp_urls[i], key=f"cam{i+1}")
             for i in range(len(rtsp_urls))
         ]
+        
+        # เพิ่มการชี้ path turbojpeg สำหรับ ARM64/Jetson เพื่อเลี่ยง fallback ช้า
+        try:
+            self.jpeg = TurboJPEG('/usr/lib/aarch64-linux-gnu/libturbojpeg.so.0')
+        except Exception:
+            try:
+                self.jpeg = TurboJPEG()
+            except Exception:
+                self.jpeg = None
+
         atexit.register(self.cleanup)
 
     def read_config(self):
@@ -73,7 +83,7 @@ class CCTV_AI_Ultralytics:
         camera = self.cameras[cam_idx]
         camera.start()
         queue = self.frame_queues[camera.name]
-        interval = 1.0 / 30.0
+        interval = 1.0 / 60.0
         last_frame_id = -1
 
         while not self.stop_process:
@@ -87,7 +97,12 @@ class CCTV_AI_Ultralytics:
                     except asyncio.QueueEmpty:
                         pass
                 await queue.put({"frame": frame, "cam_key": camera.name})
+                
+                # เรียกนับและแสดงผล Camera FPS ทุก 1 วินาที
+                self.update_capture_fps(camera.name)
+
             await asyncio.sleep(interval)
+
     async def worker(self, cam_id):
         queue = self.frame_queues[cam_id]
         print(f"Started Ultralytics Worker for {cam_id}")
@@ -105,6 +120,10 @@ class CCTV_AI_Ultralytics:
                 )
                 if processed_img is not None:
                     await self.logic(processed_img, cam_key, detection_results)
+                    
+                    # เรียกนับและแสดงผล Inference FPS ทุก 1 วินาที
+                    self.update_process_fps(cam_key)
+
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -184,14 +203,12 @@ class CCTV_AI_Ultralytics:
         try:
             cam_data = cam_data if cam_data is not None else {"detection": [], "machineCount": 0}
             now = time.time()
-            # print(cam_data)
 
             if len(cam_data["detection"]) < cam_data["machineCount"]:
                 self.miss_counter[cam_id] += 1
                 if self.miss_counter[cam_id] >= self.MISS_THRESHOLD:
                     if now - self.alarm_cooldown[cam_id] >= self.COOLDOWN_SEC:
                         self.alarm_cooldown[cam_id] = now
-                        # print(f"Detection on {cam_id}: Class=machine missing, miss={self.miss_counter[cam_id]} frames")
                         await self.alarm_detect(cam_id, "machine missing", "can not detect machine", 0.0, image)
             else:
                 self.miss_counter[cam_id] = 0
@@ -199,21 +216,20 @@ class CCTV_AI_Ultralytics:
                 if class1_det and now - self.alarm_cooldown[cam_id] >= self.COOLDOWN_SEC:
                     self.alarm_cooldown[cam_id] = now
                     confidence = class1_det["conf"]
-                    # print(f"Detection on {cam_id}: Class=alarm open, Confidence={confidence * 100:.1f}%")
                     await self.alarm_detect(cam_id, "alarm open", "open detected", confidence, image)
 
         except Exception as e:
             print(f"Error in logic: {e}")
 
-
     def _encode_image(self, image):
-        try:
-            jpeg_data = TurboJPEG().encode(image, quality=80)
-            return base64.b64encode(jpeg_data).decode('utf-8')
-        except Exception as e:
-            print(f"Error encoding image: {e}")
-            success, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            return base64.b64encode(buffer).decode('utf-8') if success else ""
+        if self.jpeg is not None:
+            try:
+                jpeg_data = self.jpeg.encode(image, quality=80)
+                return base64.b64encode(jpeg_data).decode('utf-8')
+            except Exception:
+                pass
+        success, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return base64.b64encode(buffer).decode('utf-8') if success else ""
 
     def cleanup(self):
         if self._cleanup_done:

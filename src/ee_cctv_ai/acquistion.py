@@ -35,37 +35,50 @@ class Acquisition:
     def initial(self):
         if self.cap is not None:
             return
+        is_gstreamer = False
+
         if isinstance(self.url, str) and self.url.startswith("rtsp://"):
+            # กำหนด protocols=tcp latency=200 เพื่อความเสถียร
             pipeline = (
-                f"rtspsrc location={self.url} latency=0 ! "
+                f"rtspsrc location={self.url} protocols=tcp latency=200 ! "
                 "rtph264depay ! h264parse ! nvv4l2decoder ! "
                 "nvvidconv ! video/x-raw, format=BGRx ! "
                 "videoconvert ! video/x-raw, format=BGR ! "
                 "appsink drop=true sync=false max-buffers=1"
             )
             cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            is_gstreamer = True
+
         elif isinstance(self.url, str) and self.url.endswith(".mp4"):
             abs_path = os.path.abspath(self.url)
             cap = None
             if platform.system() == "Linux" and platform.machine() == "aarch64":
                 pipeline = (
                     f'filesrc location="{abs_path}" ! '
-                    "qtdemux name=d d.video_0 ! queue ! h264parse ! nvv4l2decoder ! "
+                    "qtdemux ! h264parse ! nvv4l2decoder ! "
                     "nvvidconv ! video/x-raw, format=BGRx ! "
                     "videoconvert ! video/x-raw, format=BGR ! "
                     "appsink drop=true sync=false max-buffers=1"
                 )
                 cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+                is_gstreamer = True
+
             if cap is None or not cap.isOpened():
                 if cap is not None:
                     cap.release()
                 cap = cv2.VideoCapture(abs_path)
+                is_gstreamer = False
         else:
             cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-        try:
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
+            is_gstreamer = False
+
+        # เรียก set buffer size เฉพาะตอนที่ไม่ใช่ GStreamer เท่านั้น
+        if not is_gstreamer:
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+
         if not cap.isOpened():
             cap.release()
             raise RuntimeError(f"Failed to open video stream for {self.name}")

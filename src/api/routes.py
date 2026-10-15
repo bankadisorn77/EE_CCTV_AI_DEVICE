@@ -5,8 +5,9 @@ import os
 import signal
 from pathlib import Path
 from time import time
+from typing import Optional
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Query
 
 from src.ee_cctv_ai.schemas import AIControlRequest
 from src.ee_cctv_ai.config_store import load_config, save_config
@@ -27,22 +28,50 @@ def create_router(
     async def test_endpoint():
         return {"message": "API is working!"}
 
+    @router.get("/fps")
+    async def get_fps(cam: Optional[str] = Query(None, description="Camera key เช่น cam1, cam2")):
+        """Endpoint สำหรับดึงค่า FPS สรุปของระบบ หรือระบุเฉพาะกล้อง"""
+        pipeline = pipeline_manager.pipeline
+        if pipeline is None or not pipeline_manager.running:
+            return {
+                "running": False,
+                "message": "Pipeline is not running",
+                "stats": {}
+            }
+
+        fps_data = pipeline.get_camera_fps(cam)
+        return {
+            "running": True,
+            "target": cam if cam else "all",
+            "stats": fps_data
+        }
+
     @router.get("/status")
     async def get_pipeline_status():
         running = pipeline_manager.running
         cameras = []
         alert_status = None
         pipeline = pipeline_manager.pipeline
+        
+        # ดึง FPS ทั้งหมดเตรียมไว้
+        all_fps_stats = pipeline.get_camera_fps() if (pipeline and running) else {}
+
         if pipeline is not None:
             for camera in pipeline.cameras:
                 last_frame = camera.last_frame_at
+                cam_fps = all_fps_stats.get(camera.name, {})
+
                 cameras.append({
                     "id": camera.name,
                     "connected": camera.connected,
                     "frameId": camera.frame_id,
                     "frameAgeSeconds": round(max(0.0, time() - last_frame), 2) if last_frame else None,
+                    # พ่วงสถิติ FPS แสดงผลใน status ทันที
+                    "captureFps": round(cam_fps.get("capture", 0.0), 1),
+                    "inferenceFps": round(cam_fps.get("process", 0.0), 1),
                 })
             alert_status = pipeline.alert_service.status()
+            
         return {
             "running": running,
             "cameraCount": len(cameras),
@@ -65,11 +94,11 @@ def create_router(
             started = await pipeline_manager.start()
             if not started:
                 return {"message": "AI is already running"}
-            await send_status("now")
+            await send_status()
             return {"message": "AI started"}
         if control.action == "stop":
             await pipeline_manager.stop()
-            await send_status("now")
+            await send_status()
             return {"message": "AI stopped"}
         return {"message": "Unsupported action", "action": control.action}
 

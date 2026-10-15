@@ -47,8 +47,6 @@ class PipelineManager:
             self.shared_data.set_active_device(0)
             if self.camera_manager is not None:
                 self.camera_manager.set_active(False)
-            if self.camera_manager is not None:
-                self.camera_manager.set_active(False)
 
     async def _run(self):
         pipeline = None
@@ -88,3 +86,5 @@ class PipelineManager:
             if self.pipeline is pipeline:
                 self.pipeline = None
             self.shared_data.set_active_device(0)
+            if self.camera_manager is not None:
+                self.camera_manager.set_active(False)

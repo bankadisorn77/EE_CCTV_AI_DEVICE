@@ -3,7 +3,9 @@
 The same Acquisition instances are shared with PipelineManager; no duplicate
 RTSP readers are created.
 """
-from platform_core.project import ProjectAdapter\nfrom src.ee_cctv_ai.acquistion import Acquisition\n
+from platform_core.project import ProjectAdapter
+from src.ee_cctv_ai.acquistion import Acquisition
+
 
 class CCTVProjectAdapter(ProjectAdapter):
     project_id = "EE_CCTV_AI_DEVICE"

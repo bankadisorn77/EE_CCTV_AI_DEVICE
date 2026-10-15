@@ -60,14 +60,16 @@ shared_data = data.Data()
 LIFE = None
 nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}")
 register_task = None
-pipeline_manager = PipelineManager(CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL)
-socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
-
-# The PlatformRuntime owns the process-level lifecycle. PipelineManager remains
-# the owner of the existing high-throughput async inference pipeline; this avoids
-# introducing a second RTSP reader or changing latest-frame/batch scheduling.
-platform_project = CCTVProjectAdapter()
+# PlatformRuntime owns camera-adapter health and process lifecycle. PipelineManager
+# and inference use the exact same Acquisition objects, preserving latest-frame,
+# round-robin, batch scheduling, and avoiding duplicate RTSP readers.
+platform_project = CCTVProjectAdapter(rtsp_urls)
 platform_runtime = PlatformRuntime(project=platform_project)
+pipeline_manager = PipelineManager(
+    CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL,
+    camera_manager=platform_runtime.camera_manager,
+)
+socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
 mqtt_service = MqttControlService(pipeline_manager)
 
 

@@ -73,7 +73,11 @@ class CCTV_AI_Ultralytics:
         self.alert_service = AlertService(self.nodeJS_URL, self.API_KEY)
 
         # Readers reconnect independently; one camera must not abort pipeline startup.
-        self.cameras = list(camera_adapters) if camera_adapters is not None else [\n            Acquisition(rtsp_urls[i], key=names[i]) for i in range(len(rtsp_urls))\n        ]\n        if len(self.cameras) != len(names):\n            raise ValueError("camera_adapters must match the configured RTSP camera count")
+        self.cameras = list(camera_adapters) if camera_adapters is not None else [
+            Acquisition(rtsp_urls[i], key=names[i]) for i in range(len(rtsp_urls))
+        ]
+        if len(self.cameras) != len(names):
+            raise ValueError("camera_adapters must match the configured RTSP camera count")
 
         self.jpeg = None
         if TurboJPEG is not None:

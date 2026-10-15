@@ -54,11 +54,20 @@ frame ID, frame age, capture FPS, inference FPS, and timestamp.
 - Phase 4 (later): change the Web Server to use MQTT instead of the existing
   integration. Do not remove FastAPI or Socket.IO before that migration is tested.
 
-## Important limitation
+## Camera lifecycle and performance boundary
 
-PlatformRuntime does not currently own individual RTSP Acquisition instances:
-those are created and managed by the existing inference pipeline. This is
-deliberate for this migration step to avoid duplicate capture. MQTT status
-reports the live pipeline/camera state. A future camera-lifecycle refactor can
-make those adapters first-class Platform capabilities after Jetson integration
-tests confirm there is no performance regression.
+PlatformRuntime's CameraManager creates the RTSP Acquisition adapters once.
+PipelineManager receives those same instances and passes them into the existing
+inference pipeline. There is no second set of RTSP readers.
+
+The CCTV project opts out of connecting cameras during process startup. When
+AI starts, PipelineManager asks CameraManager to start the shared adapters;
+HealthMonitor then checks connection state and delegates recovery to the
+adapter's reconnect method. The Acquisition reader keeps its existing
+per-camera exponential-backoff reconnect loop. On AI stop, the pipeline cleans
+up the adapters and the manager marks the camera capability inactive.
+
+The inference scheduling path (latest-frame selection, round-robin batching,
+GPU executor, result handling) is intentionally unchanged. Jetson tests are
+still required to validate connection/reconnect behavior and confirm no FPS
+regression.

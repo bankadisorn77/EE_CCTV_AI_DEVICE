@@ -3,7 +3,6 @@ import asyncio
 import json
 import logging
 import os
-import threading
 import time
 from collections import OrderedDict
 
@@ -26,7 +25,7 @@ class MqttControlService:
         self.username = os.getenv("EE_CCTV_MQTT_USERNAME", "")
         self.password = os.getenv("EE_CCTV_MQTT_PASSWORD", "")
         self.client_id = os.getenv("EE_CCTV_MQTT_CLIENT_ID", "ee-cctv-ai-device")
-        self.prefix = os.getenv("EE_CCTV_MQTT_TOPIC_PREFIX", "devices/cctv").strip("/")
+        self.prefix = (os.getenv("EE_CCTV_MQTT_TOPIC_PREFIX", "devices/cctv").strip("/") or "devices/cctv")
         self.command_topic = f"{self.prefix}/command"
         self.status_topic = f"{self.prefix}/status"
         self.ack_topic = f"{self.prefix}/ack"

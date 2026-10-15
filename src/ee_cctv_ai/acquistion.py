@@ -108,6 +108,36 @@ class Acquisition:
         self.t = threading.Thread(target=self._update, name=f"{self.name}-reader", daemon=True)
         self.t.start()
 
+    # Platform camera-adapter contract. These methods reuse this Acquisition
+    # instance; they do not create another RTSP reader.
+    def connection(self, width=1920, height=1080, fps=15):
+        self.start()
+        deadline = time.monotonic() + 0.5
+        while not self.connected and self.t is not None and self.t.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return bool(self.connected)
+
+    def is_connected(self):
+        return bool(self.connected)
+
+    def reconnect(self):
+        # The reader already performs exponential-backoff reconnects while its
+        # thread is alive. Do not reset that backoff from the health monitor.
+        if self.t is not None and self.t.is_alive():
+            return bool(self.connected)
+        self.start()
+        deadline = time.monotonic() + 0.5
+        while not self.connected and self.t is not None and self.t.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return bool(self.connected)
+
+    def disconnect(self):
+        self.stop()
+
+    def get_latest_frame(self):
+        frame, _frame_id = self.latest_frame()
+        return frame
+
     def stop(self):
         # The reader thread must be the only thread that calls read()/release() on
         # this VideoCapture. Releasing it concurrently with cap.read() can trigger

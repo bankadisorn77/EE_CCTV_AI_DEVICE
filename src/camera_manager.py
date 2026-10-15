@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover
 
 class CCTV_AI_Ultralytics:
 
-    def __init__(self, rtsp_urls, shared_data, API_KEY, nodeJS_URL):
+    def __init__(self, rtsp_urls, shared_data, API_KEY, nodeJS_URL, camera_adapters=None):
         self.stop_process = False
         self._cleanup_done = False
         self._tasks = []
@@ -73,7 +73,7 @@ class CCTV_AI_Ultralytics:
         self.alert_service = AlertService(self.nodeJS_URL, self.API_KEY)
 
         # Readers reconnect independently; one camera must not abort pipeline startup.
-        self.cameras = [Acquisition(rtsp_urls[i], key=names[i]) for i in range(len(rtsp_urls))]
+        self.cameras = list(camera_adapters) if camera_adapters is not None else [\n            Acquisition(rtsp_urls[i], key=names[i]) for i in range(len(rtsp_urls))\n        ]\n        if len(self.cameras) != len(names):\n            raise ValueError("camera_adapters must match the configured RTSP camera count")
 
         self.jpeg = None
         if TurboJPEG is not None:

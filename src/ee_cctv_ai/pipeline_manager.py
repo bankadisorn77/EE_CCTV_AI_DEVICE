@@ -3,12 +3,13 @@ import asyncio
 
 
 class PipelineManager:
-    def __init__(self, pipeline_factory, camera_urls, shared_data, api_key_provider, nodejs_url):
+    def __init__(self, pipeline_factory, camera_urls, shared_data, api_key_provider, nodejs_url, camera_manager=None):
         self.pipeline_factory = pipeline_factory
         self.camera_urls = camera_urls
         self.shared_data = shared_data
         self.api_key_provider = api_key_provider
         self.nodejs_url = nodejs_url
+        self.camera_manager = camera_manager
         self.pipeline = None
         self._task = None
         self._lock = asyncio.Lock()
@@ -44,16 +45,32 @@ class PipelineManager:
                 self._task = None
             self.pipeline = None
             self.shared_data.set_active_device(0)
+            if self.camera_manager is not None:
+                self.camera_manager.set_active(False)
 
     async def _run(self):
         pipeline = None
         try:
-            pipeline = self.pipeline_factory(
-                self.camera_urls,
-                self.shared_data,
-                self.api_key_provider(),
-                self.nodejs_url,
-            )
+            if self.camera_manager is not None:
+                self.camera_manager.set_active(True)
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None, self.camera_manager.connect_all, 1920, 1080, 15
+                )
+                pipeline = self.pipeline_factory(
+                    self.camera_urls,
+                    self.shared_data,
+                    self.api_key_provider(),
+                    self.nodejs_url,
+                    camera_adapters=list(self.camera_manager.cameras.values()),
+                )
+            else:
+                pipeline = self.pipeline_factory(
+                    self.camera_urls,
+                    self.shared_data,
+                    self.api_key_provider(),
+                    self.nodejs_url,
+                )
             self.pipeline = pipeline
             await pipeline.run()
         except asyncio.CancelledError:

@@ -47,12 +47,13 @@ class PipelineManager:
             self.shared_data.set_active_device(0)
             if self.camera_manager is not None:
                 self.camera_manager.set_active(False)
+            if self.camera_manager is not None:
+                self.camera_manager.set_active(False)
 
     async def _run(self):
         pipeline = None
         try:
             if self.camera_manager is not None:
-                self.camera_manager.set_active(True)
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(
                     None, self.camera_manager.connect_all, 1920, 1080, 15

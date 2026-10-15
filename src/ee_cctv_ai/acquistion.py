@@ -7,10 +7,13 @@ import cv2
 
 
 class Acquisition:
-    def __init__(self, url, key="cam1", on_stream_end=None):
+    def __init__(self, url, key="cam1", on_stream_end=None, on_frame=None):
         self.url = url
         self.name = key
         self.on_stream_end = on_stream_end  # compatibility only; no pipeline-wide shutdown
+        # Called from the reader thread with the camera name after every new frame.
+        # Must be cheap and thread-safe; the pipeline uses it to wake the inference loop.
+        self.on_frame = on_frame
         self.cap = None
         self._image = None
         self._lock = threading.Lock()
@@ -31,6 +34,19 @@ class Acquisition:
         with self._lock:
             image = None if self._image is None else self._image.copy()
             return image, self.frame_id
+
+    def take_new_frame(self, last_id):
+        """Return (frame, frame_id) only if a frame newer than last_id exists.
+
+        No copy is made: cap.read() allocates a fresh array per frame and the reader
+        only ever REPLACES self._image, never modifies it in place. The caller owns
+        the returned array for reading; it must copy before drawing on it.
+        Returns (None, frame_id) when nothing new is available.
+        """
+        with self._lock:
+            if self._image is None or self.frame_id == last_id:
+                return None, self.frame_id
+            return self._image, self.frame_id
 
     def initial(self):
         if self.cap is not None:
@@ -143,6 +159,12 @@ class Acquisition:
                 self.frame_id += 1
                 self.last_frame_at = time.time()
             self.connected = True
+            callback = self.on_frame
+            if callback is not None:
+                try:
+                    callback(self.name)
+                except Exception as exc:
+                    print(f"[{self.name}] on_frame callback error: {exc}")
         cap = self.cap
         self.cap = None
         self.connected = False

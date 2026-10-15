@@ -33,3 +33,8 @@ pydantic>=2.0,<3.0
 
 # JPEG decoding support (ต้องมี libturbojpeg ในระบบ)
 PyTurboJPEG<2.0
+# Reusable universal Platform Core (Phase 0 branch in SFS)
+git+https://github.com/bankadisorn77/SFS.git@refactor/universal-platform-core#subdirectory=Program
+
+# MQTT command/status transport (optional at runtime; enabled by EE_CCTV_MQTT_BROKER)
+paho-mqtt>=1.6,<3

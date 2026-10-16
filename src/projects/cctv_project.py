@@ -25,7 +25,7 @@ class CCTVProjectAdapter(ProjectAdapter):
         self._camera_manager = None
         self._pipeline = None
         self._pipeline_task = None
-        self._lifecycle_lock = asyncio.Lock()
+        # Created lazily inside the active event loop (compatible with Python 3.8).\n        self._lifecycle_lock = None
 
     def bind_services(self, pipeline_factory, shared_data, api_key_provider, nodejs_url,
                       camera_manager):
@@ -53,9 +53,9 @@ class CCTVProjectAdapter(ProjectAdapter):
         )):
             raise RuntimeError("CCTVProjectAdapter services have not been bound.")
 
-    async def start(self):
+    def _get_lifecycle_lock(self):\n        if self._lifecycle_lock is None:\n            self._lifecycle_lock = asyncio.Lock()\n        return self._lifecycle_lock\n\n    async def start(self):
         """Start shared camera adapters and the CCTV inference pipeline once."""
-        async with self._lifecycle_lock:
+        async with self._get_lifecycle_lock():
             self._require_bound()
             if self.running:
                 return False

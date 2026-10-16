@@ -15,9 +15,15 @@ class CCTVProjectAdapter(ProjectAdapter):
         self.rtsp_urls = list(rtsp_urls)
         self._pipeline_manager = None
 
-    def bind_pipeline_manager(self, pipeline_manager):
-        """Inject the CCTV inference implementation after runtime construction."""
-        self._pipeline_manager = pipeline_manager
+    def configure_pipeline(self, pipeline_factory, shared_data, api_key_provider, nodejs_url, camera_manager):
+        """Create the project pipeline using the adapters owned by PlatformRuntime."""
+        from src.ee_cctv_ai.pipeline_manager import PipelineManager
+
+        self._pipeline_manager = PipelineManager(
+            pipeline_factory, self.rtsp_urls, shared_data, api_key_provider,
+            nodejs_url, camera_manager=camera_manager,
+        )
+        return self._pipeline_manager
 
     def _manager(self):
         if self._pipeline_manager is None:
@@ -42,7 +48,7 @@ class CCTVProjectAdapter(ProjectAdapter):
 
     def camera_definition(self):
         return [
-            {"id": "cam{}".format(index + 1), "url": url, "enabled": bool(url)}
+            {"id": "cam{}".format(index + 1), "url": url, "enabled": True}
             for index, url in enumerate(self.rtsp_urls)
         ]
 

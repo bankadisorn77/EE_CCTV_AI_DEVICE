@@ -53,7 +53,12 @@ class CCTVProjectAdapter(ProjectAdapter):
         )):
             raise RuntimeError("CCTVProjectAdapter services have not been bound.")
 
-    def _get_lifecycle_lock(self):\n        if self._lifecycle_lock is None:\n            self._lifecycle_lock = asyncio.Lock()\n        return self._lifecycle_lock\n\n    async def start(self):
+    def _get_lifecycle_lock(self):
+        if self._lifecycle_lock is None:
+            self._lifecycle_lock = asyncio.Lock()
+        return self._lifecycle_lock
+
+    async def start(self):
         """Start shared camera adapters and the CCTV inference pipeline once."""
         async with self._get_lifecycle_lock():
             self._require_bound()

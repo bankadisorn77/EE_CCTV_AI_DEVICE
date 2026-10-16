@@ -44,7 +44,7 @@ from src.ee_cctv_ai.device_service import register_device
 from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.socket_service import SocketStatusService
 from src.ee_cctv_ai.mqtt_control import MqttControlService
-from src.platform_integration import CCTVProjectAdapter
+from src.projects.cctv_project import CCTVProjectAdapter
 from platform_core.runtime import PlatformRuntime
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
@@ -59,12 +59,11 @@ shared_data = data.Data()
 LIFE = None
 nodeJS_URL = os.getenv("NODEJS_URL", f"http://{webserver_host}:{webserver_port}")
 register_task = None
-# PlatformRuntime owns camera-adapter health and process lifecycle. PipelineManager
-# and inference use the exact same Acquisition objects, preserving latest-frame,
-# round-robin, batch scheduling, and avoiding duplicate RTSP readers.
+# Platform Core owns generic camera lifecycle/health. The CCTV ProjectAdapter owns
+# the optimized inference task and reuses Runtime-created Acquisition instances.
 platform_project = CCTVProjectAdapter(rtsp_urls)
 platform_runtime = PlatformRuntime(project=platform_project)
-platform_project.configure_pipeline(
+platform_project.bind_services(
     CCTV_AI, shared_data, lambda: API_KEY, nodeJS_URL,
     camera_manager=platform_runtime.camera_manager,
 )
@@ -127,7 +126,7 @@ from src.api.routes import create_router
 app = FastAPI(lifespan=lifespan)
 app.include_router(
     create_router(
-        pipeline_manager=platform_project,
+        project_adapter=platform_project,
         shared_data=shared_data,
         config_path=CONFIG_PATH,
         device_config_path=DEVICE_CONFIG_PATH,

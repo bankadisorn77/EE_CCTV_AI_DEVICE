@@ -40,7 +40,6 @@ device_config = load_device_config()
 from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI
 from src.shere_data import data
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
-from src.ee_cctv_ai.pipeline_manager import PipelineManager
 from src.ee_cctv_ai.device_service import register_device
 from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.socket_service import SocketStatusService
@@ -65,11 +64,10 @@ register_task = None
 # round-robin, batch scheduling, and avoiding duplicate RTSP readers.
 platform_project = CCTVProjectAdapter(rtsp_urls)
 platform_runtime = PlatformRuntime(project=platform_project)
-pipeline_manager = PipelineManager(
-    CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL,
+pipeline_manager = platform_project.configure_pipeline(
+    CCTV_AI, shared_data, lambda: API_KEY, nodeJS_URL,
     camera_manager=platform_runtime.camera_manager,
 )
-platform_project.bind_pipeline_manager(pipeline_manager)
 socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
 mqtt_service = MqttControlService(platform_project)
 
@@ -85,6 +83,7 @@ async def lifespan(app: FastAPI):
     global register_task
     background_tasks = []
     platform_runtime.start()
+    platform_runtime.run()
     mqtt_service.start(asyncio.get_running_loop())
     background_tasks.append(
         asyncio.create_task(mqtt_service.status_loop(), name="mqtt-status-heartbeat")

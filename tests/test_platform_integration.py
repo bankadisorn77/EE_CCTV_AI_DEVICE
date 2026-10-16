@@ -1,8 +1,8 @@
-"""Hardware-independent integration tests for the CCTV Platform Core adapter."""
+"""Hardware-independent tests for the direct Platform Core CCTV project adapter."""
 import asyncio
 import unittest
 
-from src.platform_integration import CCTVProjectAdapter
+from src.projects.cctv_project import CCTVProjectAdapter
 
 
 class FakeSharedData:
@@ -51,7 +51,7 @@ class FakePipeline:
 
 
 class PlatformIntegrationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_project_owns_camera_and_pipeline_lifecycle(self):
+    async def test_project_adapter_directly_owns_inference_lifecycle(self):
         project = CCTVProjectAdapter(["rtsp://camera"])
         camera_manager = FakeCameraManager()
         shared = FakeSharedData()
@@ -62,9 +62,7 @@ class PlatformIntegrationTests(unittest.IsolatedAsyncioTestCase):
             instances.append(pipeline)
             return pipeline
 
-        manager = project.configure_pipeline(
-            factory, shared, lambda: "", "http://localhost", camera_manager
-        )
+        project.bind_services(factory, shared, lambda: "", "http://localhost", camera_manager)
 
         self.assertTrue(await project.start())
         self.assertFalse(await project.start())
@@ -77,13 +75,16 @@ class PlatformIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(camera_manager.connect_calls, 1)
         self.assertTrue(camera_manager.active)
         self.assertTrue(project.running)
-        self.assertIs(project.pipeline, manager.pipeline)
+        self.assertIs(project.pipeline, instances[0])
+        self.assertEqual(shared.active, 1)
 
         await project.stop()
         self.assertFalse(project.running)
+        self.assertIsNone(project.pipeline)
         self.assertFalse(camera_manager.active)
         self.assertEqual(camera_manager.disconnect_calls, 1)
         self.assertEqual(instances[0].cleaned, 1)
+        self.assertEqual(shared.active, 0)
 
     def test_camera_definitions_preserve_configured_camera_slots(self):
         project = CCTVProjectAdapter(["rtsp://camera-1", "", "rtsp://camera-3"])

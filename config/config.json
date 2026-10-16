@@ -2,42 +2,42 @@
     "cameras": [
         {
             "name": "cam1",
-            "machineCount": 3,
+            "machineCount": 0,
             "roi": {
-                "col1": 492,
-                "row1": 268,
-                "col2": 1834,
-                "row2": 1076
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam2",
-            "machineCount": 4,
+            "machineCount": 0,
             "roi": {
-                "col1": 130,
-                "row1": 304,
-                "col2": 1804,
-                "row2": 1078
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam3",
-            "machineCount": 3,
+            "machineCount": 0,
             "roi": {
-                "col1": 258,
-                "row1": 270,
-                "col2": 1350,
-                "row2": 868
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam4",
-            "machineCount": 4,
+            "machineCount": 0,
             "roi": {
-                "col1": 452,
-                "row1": 290,
-                "col2": 1812,
-                "row2": 874
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         }
     ],

@@ -7,11 +7,13 @@ service and adds an MQTT command/status bridge. The existing FastAPI routes,
 Socket.IO client, Web Server registration, and alert delivery remain unchanged.
 Web Server migration is Phase 4 and is intentionally out of scope.
 
-The application follows the SFS structure: `main.py → PlatformRuntime →
-CCTVProjectAdapter`. PlatformRuntime constructs and owns the camera adapters
-and HealthMonitor. The project adapter owns the CCTV-specific lifecycle and
-assembles the existing PipelineManager; PipelineManager owns only the async
-inference task and reuses the platform-created Acquisition instances.
+The application now uses the Platform Core project contract directly:
+`src/main.py → PlatformRuntime → src/projects/cctv_project.py:CCTVProjectAdapter`.
+PlatformRuntime constructs and owns the camera adapters and HealthMonitor.
+CCTVProjectAdapter directly owns the async inference task and creates the
+existing optimized CCTV inference pipeline using the exact Acquisition instances
+owned by PlatformRuntime. The legacy `src/platform_integration.py` wrapper and
+`PipelineManager` layer have been removed.
 
 The SFS `platform_core` package is vendored as a source snapshot in this
 repository because the SFS repository requires GitHub authentication in the
@@ -64,9 +66,9 @@ frame ID, frame age, capture FPS, inference FPS, and timestamp.
 ## Camera lifecycle and performance boundary
 
 PlatformRuntime's CameraManager creates the RTSP Acquisition adapters once.
-CCTVProjectAdapter activates/deactivates them through that manager, and
-PipelineManager receives the exact same instances for inference. There is no
-second set of RTSP readers.
+CCTVProjectAdapter activates/deactivates them through that manager and passes
+the same instances directly to the inference pipeline. There is no second set
+of RTSP readers.
 
 The CCTV project opts out of connecting cameras during process startup. When
 AI starts, CCTVProjectAdapter asks CameraManager to connect the shared adapters

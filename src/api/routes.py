@@ -48,10 +48,10 @@ def create_router(
 
     @router.get("/status")
     async def get_pipeline_status():
-        running = pipeline_manager.running
+        running = project_adapter.running
         cameras = []
         alert_status = None
-        pipeline = pipeline_manager.pipeline
+        pipeline = project_adapter.pipeline
         
         # ดึง FPS ทั้งหมดเตรียมไว้
         all_fps_stats = pipeline.get_camera_fps() if (pipeline and running) else {}

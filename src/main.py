@@ -111,7 +111,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await pipeline_manager.stop()
+        await platform_project.stop()
         mqtt_service.stop()
         platform_runtime.stop()
         for task in background_tasks:
@@ -127,7 +127,7 @@ from src.api.routes import create_router
 app = FastAPI(lifespan=lifespan)
 app.include_router(
     create_router(
-        pipeline_manager=pipeline_manager,
+        pipeline_manager=platform_project,
         shared_data=shared_data,
         config_path=CONFIG_PATH,
         device_config_path=DEVICE_CONFIG_PATH,

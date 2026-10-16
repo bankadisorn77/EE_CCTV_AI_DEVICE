@@ -69,8 +69,9 @@ pipeline_manager = PipelineManager(
     CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL,
     camera_manager=platform_runtime.camera_manager,
 )
+platform_project.bind_pipeline_manager(pipeline_manager)
 socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
-mqtt_service = MqttControlService(pipeline_manager)
+mqtt_service = MqttControlService(platform_project)
 
 
 def set_api_key(value):

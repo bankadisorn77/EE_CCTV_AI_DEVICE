@@ -13,6 +13,12 @@ and HealthMonitor. The project adapter owns the CCTV-specific lifecycle and
 assembles the existing PipelineManager; PipelineManager owns only the async
 inference task and reuses the platform-created Acquisition instances.
 
+The SFS `platform_core` package is vendored as a source snapshot in this
+repository because the SFS repository requires GitHub authentication in the
+current CI/deployment environment. This keeps CCTV installation self-contained.
+When Platform Core changes in SFS, intentionally sync and test the corresponding
+snapshot here; the two copies do not update automatically.
+
 ## Enable MQTT
 
 Set these environment variables on the CCTV service:

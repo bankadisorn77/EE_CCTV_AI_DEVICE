@@ -7,10 +7,11 @@ service and adds an MQTT command/status bridge. The existing FastAPI routes,
 Socket.IO client, Web Server registration, and alert delivery remain unchanged.
 Web Server migration is Phase 4 and is intentionally out of scope.
 
-The PlatformRuntime owns process-level lifecycle and HealthMonitor. The existing
-PipelineManager continues to own the async inference pipeline and RTSP readers.
-This avoids opening duplicate streams or changing latest-frame, round-robin,
-batching, and GPU-executor behavior.
+The application follows the SFS structure: `main.py → PlatformRuntime →
+CCTVProjectAdapter`. PlatformRuntime constructs and owns the camera adapters
+and HealthMonitor. The project adapter owns the CCTV-specific lifecycle and
+assembles the existing PipelineManager; PipelineManager owns only the async
+inference task and reuses the platform-created Acquisition instances.
 
 ## Enable MQTT
 
@@ -57,15 +58,18 @@ frame ID, frame age, capture FPS, inference FPS, and timestamp.
 ## Camera lifecycle and performance boundary
 
 PlatformRuntime's CameraManager creates the RTSP Acquisition adapters once.
-PipelineManager receives those same instances and passes them into the existing
-inference pipeline. There is no second set of RTSP readers.
+CCTVProjectAdapter activates/deactivates them through that manager, and
+PipelineManager receives the exact same instances for inference. There is no
+second set of RTSP readers.
 
 The CCTV project opts out of connecting cameras during process startup. When
-AI starts, PipelineManager asks CameraManager to start the shared adapters;
-HealthMonitor then checks connection state and delegates recovery to the
-adapter's reconnect method. The Acquisition reader keeps its existing
-per-camera exponential-backoff reconnect loop. On AI stop, the pipeline cleans
-up the adapters and the manager marks the camera capability inactive.
+AI starts, CCTVProjectAdapter asks CameraManager to connect the shared adapters
+off the FastAPI event loop, then marks camera health active and starts inference.
+HealthMonitor checks connection state and delegates recovery to each adapter.
+The Acquisition reader keeps its existing per-camera exponential-backoff
+reconnect loop. On AI stop, inference is awaited and cleaned up before the
+project deactivates and disconnects cameras. HTTP and MQTT controls use the
+same project-level start/stop methods, so they cannot bypass camera lifecycle.
 
 The inference scheduling path (latest-frame selection, round-robin batching,
 GPU executor, result handling) is intentionally unchanged. Jetson tests are

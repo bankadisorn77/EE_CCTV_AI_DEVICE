@@ -14,7 +14,7 @@ from src.ee_cctv_ai.config_store import load_config, save_config
 
 
 def create_router(
-    pipeline_manager,
+    project_adapter,
     shared_data,
     config_path,
     device_config_path,
@@ -31,8 +31,8 @@ def create_router(
     @router.get("/fps")
     async def get_fps(cam: Optional[str] = Query(None, description="Camera key เช่น cam1, cam2")):
         """Endpoint สำหรับดึงค่า FPS สรุปของระบบ หรือระบุเฉพาะกล้อง"""
-        pipeline = pipeline_manager.pipeline
-        if pipeline is None or not pipeline_manager.running:
+        pipeline = project_adapter.pipeline
+        if pipeline is None or not project_adapter.running:
             return {
                 "running": False,
                 "message": "Pipeline is not running",
@@ -91,13 +91,13 @@ def create_router(
         save_config(config_data, config_path)
 
         if control.action == "start":
-            started = await pipeline_manager.start()
+            started = await project_adapter.start()
             if not started:
                 return {"message": "AI is already running"}
             await send_status()
             return {"message": "AI started"}
         if control.action == "stop":
-            await pipeline_manager.stop()
+            await project_adapter.stop()
             await send_status()
             return {"message": "AI stopped"}
         return {"message": "Unsupported action", "action": control.action}

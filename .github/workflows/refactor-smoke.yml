@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - refactor/rtsp-pipeline-lifecycle
+      - refactor/platform-mqtt-integration
   pull_request:
     branches:
       - main
@@ -17,7 +18,9 @@ jobs:
         with:
           python-version: "3.8"
       - name: Install test dependency
-        run: python -m pip install "opencv-python-headless==4.10.0.84" "httpx<0.28" "fastapi<0.100" "python-socketio" "uvicorn" "psutil"
+        run: |
+          python -m pip install "opencv-python-headless==4.10.0.84" "httpx<0.28" "fastapi<0.100" "python-socketio" "uvicorn" "psutil"
+          python -m pip install "git+https://github.com/bankadisorn77/SFS.git@refactor/universal-platform-core#subdirectory=Program"
       - name: Compile Python source
         run: python -m compileall -q src tests
       - name: Run hardware-independent tests

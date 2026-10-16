@@ -64,7 +64,7 @@ register_task = None
 # round-robin, batch scheduling, and avoiding duplicate RTSP readers.
 platform_project = CCTVProjectAdapter(rtsp_urls)
 platform_runtime = PlatformRuntime(project=platform_project)
-pipeline_manager = platform_project.configure_pipeline(
+platform_project.configure_pipeline(
     CCTV_AI, shared_data, lambda: API_KEY, nodeJS_URL,
     camera_manager=platform_runtime.camera_manager,
 )

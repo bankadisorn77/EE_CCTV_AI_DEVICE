@@ -1,4 +1,4 @@
-"""MQTT command/status bridge for the existing CCTV PipelineManager."""
+"""MQTT command/status bridge for the CCTV project adapter."""
 import asyncio
 import json
 import logging
@@ -10,7 +10,7 @@ logger = logging.getLogger("CCTV.MQTT")
 
 
 class MqttControlService:
-    """Translate MQTT commands into async PipelineManager calls.
+    """Translate MQTT commands into project-level lifecycle calls.
 
     Commands: start, stop, get_status.
     Topics default to <prefix>/command, <prefix>/status, and <prefix>/ack.
@@ -18,8 +18,8 @@ class MqttControlService:
     disabled and the existing FastAPI controls continue to work.
     """
 
-    def __init__(self, pipeline_manager):
-        self.pipeline_manager = pipeline_manager
+    def __init__(self, project):
+        self.project = project
         self.broker = os.getenv("EE_CCTV_MQTT_BROKER", "").strip()
         self.port = int(os.getenv("EE_CCTV_MQTT_PORT", "1883"))
         self.username = os.getenv("EE_CCTV_MQTT_USERNAME", "")
@@ -33,7 +33,6 @@ class MqttControlService:
         self.loop = None
         self._dispatch_lock = None
         self._recent = OrderedDict()
-        self._lock = threading.Lock()
 
     @property
     def enabled(self):
@@ -58,6 +57,7 @@ class MqttControlService:
         client.on_message = self._on_message
         client.on_disconnect = self._on_disconnect
         self.client = client
+        # connect_async + loop_start enables Paho's automatic reconnect behaviour.
         client.connect_async(self.broker, self.port, keepalive=30)
         client.loop_start()
         logger.info("MQTT client starting for broker %s:%s", self.broker, self.port)
@@ -89,7 +89,7 @@ class MqttControlService:
             logger.error("MQTT connect failed: %s", reason_code)
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=None, properties=None):
-        logger.warning("MQTT disconnected: %s", reason_code)
+        logger.warning("MQTT disconnected: %s", reason_code if reason_code is not None else disconnect_flags)
 
     def _on_message(self, client, userdata, message):
         if self.loop is None or self.loop.is_closed():
@@ -106,7 +106,15 @@ class MqttControlService:
                 "ok": False, "error": "command_must_be_object", "timestamp": time.time()
             })
             return
-        asyncio.run_coroutine_threadsafe(self._dispatch(payload), self.loop)
+        future = asyncio.run_coroutine_threadsafe(self._dispatch(payload), self.loop)
+        future.add_done_callback(self._log_dispatch_failure)
+
+    @staticmethod
+    def _log_dispatch_failure(future):
+        try:
+            future.result()
+        except Exception:
+            logger.exception("MQTT command dispatch failed")
 
     async def _dispatch(self, payload):
         if self._dispatch_lock is None:
@@ -118,24 +126,33 @@ class MqttControlService:
                 return
 
             command = str(payload.get("command", "")).strip().lower()
-            if command == "start":
-                if self.pipeline_manager.running:
-                    ack = {"ok": True, "command": command, "message": "already_running"}
+            try:
+                if command == "start":
+                    if self.project.running:
+                        ack = {"ok": True, "command": command, "message": "already_running"}
+                    else:
+                        started = await self.project.start()
+                        ack = {
+                            "ok": bool(started or self.project.running),
+                            "command": command,
+                            "message": "started" if started else "already_running",
+                        }
+                elif command == "stop":
+                    was_running = self.project.running
+                    if was_running:
+                        await self.project.stop()
+                    ack = {
+                        "ok": True,
+                        "command": command,
+                        "message": "stopped" if was_running else "already_stopped",
+                    }
+                elif command in ("status", "get_status"):
+                    ack = {"ok": True, "command": "get_status", "status": self.status_snapshot()}
                 else:
-                    started = await self.pipeline_manager.start()
-                    ack = {"ok": bool(started or self.pipeline_manager.running),
-                           "command": command,
-                           "message": "started" if started else "already_running"}
-            elif command == "stop":
-                was_running = self.pipeline_manager.running
-                if was_running:
-                    await self.pipeline_manager.stop()
-                ack = {"ok": True, "command": command,
-                       "message": "stopped" if was_running else "already_stopped"}
-            elif command in ("status", "get_status"):
-                ack = {"ok": True, "command": "get_status", "status": self.status_snapshot()}
-            else:
-                ack = {"ok": False, "command": command, "error": "unsupported_command"}
+                    ack = {"ok": False, "command": command, "error": "unsupported_command"}
+            except Exception as exc:
+                logger.exception("MQTT command %s failed", command)
+                ack = {"ok": False, "command": command, "error": "command_failed", "detail": str(exc)}
 
             ack["command_id"] = command_id or None
             ack["timestamp"] = time.time()
@@ -148,7 +165,7 @@ class MqttControlService:
             self.publish_status()
 
     def status_snapshot(self):
-        pipeline = self.pipeline_manager.pipeline
+        pipeline = self.project.pipeline
         cameras = []
         fps = pipeline.get_camera_fps() if pipeline is not None else {}
         if pipeline is not None:
@@ -165,7 +182,7 @@ class MqttControlService:
                 })
         return {
             "service": "EE_CCTV_AI_DEVICE",
-            "pipeline_running": bool(self.pipeline_manager.running),
+            "pipeline_running": bool(self.project.running),
             "cameras": cameras,
             "timestamp": time.time(),
         }

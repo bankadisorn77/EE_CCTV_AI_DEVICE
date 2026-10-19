@@ -15,6 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.ee_cctv_ai import model_process_ultralytics as model_process
 from src.ee_cctv_ai.acquistion import Acquisition
 from src.ee_cctv_ai.alert_service import AlertService
+from src.ee_cctv_ai.alarm_rules import AlarmRuleEngine
+from src.ee_cctv_ai.alarm_renderer import draw_detections as render_detections
 from src.ee_cctv_ai.config_store import load_config
 
 try:  # optional: CI / dev machines may not have torch or libturbojpeg
@@ -45,6 +47,11 @@ class CCTV_AI:
         self.alarm_cooldown = {n: 0 for n in names}
         self.MISS_SECONDS = float(os.getenv("EE_CCTV_MISS_SECONDS", 2))
         self.COOLDOWN_SEC = 5
+        self.rule_engine = AlarmRuleEngine(
+            getattr(self, "app_config", {}),
+            legacy_miss_seconds=self.MISS_SECONDS,
+            legacy_cooldown_seconds=self.COOLDOWN_SEC,
+        )
         self.start_time = None
 
 
@@ -95,10 +102,12 @@ class CCTV_AI:
     def read_config(self):
         try:
             config_data = load_config(PROJECT_ROOT / "config" / "config.json")
+            self.app_config = config_data
             self.shared_data.set_config(config_data.get("cameras", []))
             self.shared_data.set_confidence_threshold(config_data.get("confidence_threshold", 0.5))
             print("Unified config loaded successfully.")
         except Exception as e:
+            self.app_config = {}
             print(f"Config error (config.json): {e}")
             self.shared_data.set_config([{"name": f"cam{i+1}", "roi": None} for i in range(len(self.urls))])
             self.shared_data.set_confidence_threshold(0.5)
@@ -209,7 +218,9 @@ class CCTV_AI:
                     # cam_models_det = {"model_1": dets_array_1, "model_2": dets_array_2, ...}
                     if isinstance(cam_models_det, dict):
                         models_payload = {
-                            m_name: model_process.build_payload(d, cfg)
+                            m_name: model_process.build_payload(
+                                d, cfg, model_process.model_class_names(m_name)
+                            )
                             for m_name, d in cam_models_det.items()
                         }
                     else:
@@ -314,75 +325,76 @@ class CCTV_AI:
             await self.alert_service.stop()
 
     # --------------------------------- alarms ---------------------------------
-    def _render_alarm_image(self, image, detections):
-        """Draw boxes on a COPY (frames are shared with the camera) and JPEG-encode."""
-        return self._encode_image(model_process.draw_detections(image, detections))
+    def _render_alarm_image(self, image, detections, render_config=None):
+        """Render on a copy so the shared RTSP frame is never mutated."""
+        return self._encode_image(render_detections(image, detections, render_config))
 
-    async def alarm_detect(self, camid, detection_class, message, confidence, image, detections=None):
+    async def alarm_detect(
+        self, camid, detection_class, message, confidence, image, detections=None,
+        *, model_detections=None, image_mode="combined", render_config=None,
+        model_id=None, rule_id=None,
+    ):
         image_base64_str = ""
+        model_image_base64_str = ""
         if image is not None:
             loop = asyncio.get_running_loop()
-            image_base64_str = await loop.run_in_executor(
-                model_process.cpu_executor,
-                self._render_alarm_image,
-                image,
-                detections,
-            )
+            if image_mode in {"combined", "both"}:
+                image_base64_str = await loop.run_in_executor(
+                    model_process.cpu_executor,
+                    self._render_alarm_image, image, detections, render_config,
+                )
+            if image_mode == "model":
+                image_base64_str = await loop.run_in_executor(
+                    model_process.cpu_executor,
+                    self._render_alarm_image, image, model_detections or detections, render_config,
+                )
+            elif image_mode == "both":
+                model_image_base64_str = await loop.run_in_executor(
+                    model_process.cpu_executor,
+                    self._render_alarm_image, image, model_detections or [], render_config,
+                )
+
         payload = {
             "alarmType": detection_class,
             "message": message,
             "cameraId": f"{camid[:3].upper()}-0{camid[3:]}",
             "confidence": confidence * 100,
-            "imageBase64": f"data:image/jpeg;base64,{image_base64_str}" if image_base64_str else None
+            "imageBase64": f"data:image/jpeg;base64,{image_base64_str}" if image_base64_str else None,
         }
+        # Optional additive metadata; legacy fields above remain unchanged.
+        if model_id is not None:
+            payload["modelId"] = model_id
+        if rule_id is not None:
+            payload["ruleId"] = rule_id
+        if image_mode == "both":
+            payload["modelImageBase64"] = (
+                f"data:image/jpeg;base64,{model_image_base64_str}" if model_image_base64_str else None
+            )
 
         # Queue the alert and return immediately; delivery must not block detection.
         await self.alert_service.enqueue(payload)
         return payload
 
     async def logic(self, image, cam_id, models_payload):
-        """
-        models_payload มีโครงสร้างเป็น dict ของทั้ง 1-4 โมเดล:
-        {
-            "model_1": {"detection": [...], "machineCount": int},
-            "model_2": {"detection": [...], "machineCount": int},
-            "model_3": {"detection": [...], "machineCount": int},
-            "model_4": {"detection": [...], "machineCount": int},
-        }
-        """
+        """Evaluate all configured model/rule pairs without hard-coded model slots."""
         try:
             if not models_payload:
                 return
-
-            # ดึงผลลัพธ์ของแต่ละโมเดลออกมาเตรียมไว้ใช้งานต่อ
-            m1_data = models_payload.get("model_1", {"detection": [], "machineCount": 0})
-            m2_data = models_payload.get("model_2", {"detection": [], "machineCount": 0})
-            m3_data = models_payload.get("model_3", {"detection": [], "machineCount": 0})
-            m4_data = models_payload.get("model_4", {"detection": [], "machineCount": 0})
-
-            # ลอจิกเดิม (ทำงานกับ model_1 เป็นค่าเริ่มต้น สามารถปรับแก้เงื่อนไขผสม m1-m4 ต่อได้เลย)
-            now = time.time()
-            detections = m1_data["detection"]
-            machine_count = m1_data["machineCount"]
-
-            if len(detections) < machine_count:
-                if self.miss_since[cam_id] is None:
-                    self.miss_since[cam_id] = now
-                if now - self.miss_since[cam_id] >= self.MISS_SECONDS:
-                    if now - self.alarm_cooldown[cam_id] >= self.COOLDOWN_SEC:
-                        self.alarm_cooldown[cam_id] = now
-                        await self.alarm_detect(
-                            cam_id, "machine missing", "can not detect machine", 0.0, image, detections
-                        )
-            else:
-                self.miss_since[cam_id] = None
-                class1_det = next((det for det in detections if det["class"] == 1), None)
-                if class1_det and now - self.alarm_cooldown[cam_id] >= self.COOLDOWN_SEC:
-                    self.alarm_cooldown[cam_id] = now
-                    await self.alarm_detect(
-                        cam_id, "alarm open", "open detected", class1_det["conf"], image, detections
-                    )
-
+            events = self.rule_engine.evaluate(cam_id, models_payload)
+            for event in events:
+                await self.alarm_detect(
+                    cam_id,
+                    event["alarm_type"],
+                    event["message"],
+                    event["confidence"],
+                    image,
+                    event["detections"],
+                    model_detections=event["model_detections"],
+                    image_mode=event["image_mode"],
+                    render_config=event.get("render"),
+                    model_id=event["model_id"],
+                    rule_id=event["rule_id"],
+                )
         except Exception as e:
             print(f"Error in logic: {e}")
 

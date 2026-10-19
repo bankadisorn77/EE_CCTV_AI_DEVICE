@@ -1,5 +1,6 @@
 """Geometry / payload tests for the batched inference helpers (no GPU needed)."""
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -56,11 +57,13 @@ class LetterboxTests(unittest.TestCase):
     def test_preprocess_roi_is_a_view(self):
         img = np.zeros((200, 300, 3), np.uint8)
         cfg = {"roi": {"row1": 20, "row2": 120, "col1": 50, "col2": 250}}
-        crop, off = mp.cv2_preprocess_fast(img, cfg)
+        with patch.object(mp, "USE_ROI_CROP", True):
+            crop, off = mp.cv2_preprocess_fast(img, cfg)
         self.assertEqual(crop.shape[:2], (100, 200))
         self.assertEqual(off, (50, 20))
         self.assertTrue(np.shares_memory(crop, img))
-        crop2, off2 = mp.cv2_preprocess_fast(img, {"roi": {"row1": None, "col1": None, "row2": None, "col2": None}})
+        with patch.object(mp, "USE_ROI_CROP", True):
+            crop2, off2 = mp.cv2_preprocess_fast(img, {"roi": {"row1": None, "col1": None, "row2": None, "col2": None}})
         self.assertEqual(off2, (0, 0))
         self.assertEqual(crop2.shape, img.shape)
 

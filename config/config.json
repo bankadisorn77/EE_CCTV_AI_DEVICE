@@ -1,13 +1,49 @@
 {
     "cameras": [
-        {"name": "cam1", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
-        {"name": "cam2", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
-        {"name": "cam3", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
-        {"name": "cam4", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}}
+        {
+            "name": "cam1",
+            "machineCount": 0,
+            "roi": {
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
+            }
+        },
+        {
+            "name": "cam2",
+            "machineCount": 0,
+            "roi": {
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
+            }
+        },
+        {
+            "name": "cam3",
+            "machineCount": 0,
+            "roi": {
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
+            }
+        },
+        {
+            "name": "cam4",
+            "machineCount": 0,
+            "roi": {
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
+            }
+        }
     ],
     "confidence_threshold": 0.7,
     "alarm_image": {
-        "mode": "both",
+        "mode": "model",
         "color_mode": "auto",
         "show_label": true,
         "show_confidence": true,
@@ -18,8 +54,19 @@
             "id": "model_1",
             "enabled": true,
             "render": {
-                "mode": "both",
-                "color_mode": "auto",
+                "mode": "model",
+                "class_colors": {
+                    "normal": [
+                        0,
+                        255,
+                        0
+                    ],
+                    "open": [
+                        0,
+                        0,
+                        255
+                    ]
+                },
                 "show_label": true,
                 "show_confidence": true
             },

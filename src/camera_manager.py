@@ -435,3 +435,6 @@ class CCTV_AI:
             pass
         self.shared_data.set_LIFE("active")
         print("CCTV_AI (Ultralytics) cleanup complete.")
+
+# Backward-compatible public name used by earlier callers/tests.
+CCTV_AI_Ultralytics = CCTV_AI

@@ -41,5 +41,51 @@
             }
         }
     ],
-    "confidence_threshold": 0.7
+    "confidence_threshold": 0.7,
+    "alarm_image": {
+        "mode": "both",
+        "show_label": true,
+        "show_confidence": true,
+        "thickness": 2
+    },
+    "models": [
+        {
+            "id": "model_1",
+            "enabled": true,
+            "render": {
+                "mode": "both",
+                "show_label": true,
+                "show_confidence": true
+            },
+            "alarm_rules": [
+                {
+                    "id": "machine_missing",
+                    "type": "count_below",
+                    "expected_count_from_camera": true,
+                    "duration_sec": 2,
+                    "cooldown_sec": 5,
+                    "alarm_type": "machine missing",
+                    "message": "can not detect machine"
+                },
+                {
+                    "id": "alarm_open",
+                    "type": "class_detected",
+                    "class_id": 1,
+                    "cooldown_sec": 5,
+                    "alarm_type": "alarm open",
+                    "message": "open detected"
+                }
+            ]
+        },
+        {
+            "id": "model_2",
+            "enabled": true,
+            "render": {
+                "mode": "model",
+                "show_label": true,
+                "show_confidence": true
+            },
+            "alarm_rules": []
+        }
+    ]
 }

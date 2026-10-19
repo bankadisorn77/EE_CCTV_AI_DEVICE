@@ -380,7 +380,16 @@ class CCTV_AI:
         try:
             if not models_payload:
                 return
+            # Accept the former single-model payload shape as well as the new model-id map.
+            if isinstance(models_payload, dict) and "detection" in models_payload:
+                models_payload = {"model_1": models_payload}
+            self.rule_engine.legacy_miss_seconds = self.MISS_SECONDS
+            self.rule_engine.legacy_cooldown_seconds = self.COOLDOWN_SEC
             events = self.rule_engine.evaluate(cam_id, models_payload)
+            if not self.rule_engine.config.get("models"):
+                self.miss_since[cam_id] = self.rule_engine._since.get(
+                    (cam_id, "model_1", "legacy_machine_missing")
+                )
             for event in events:
                 await self.alarm_detect(
                     cam_id,

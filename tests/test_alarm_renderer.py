@@ -31,6 +31,27 @@ class AlarmRendererTests(unittest.TestCase):
         })
         self.assertEqual(color, (0, 0, 255))
 
+
+    def test_custom_class_color_can_use_numeric_class_id_string(self):
+        color = _color_for(self.detection, {
+            "color_mode": "custom", "class_colors": {"0": [0, 255, 0]},
+        })
+        self.assertEqual(color, (0, 255, 0))
+
+    def test_custom_class_name_lookup_is_case_insensitive(self):
+        detection = dict(self.detection, class_name="Open", **{"class": 1})
+        color = _color_for(detection, {
+            "color_mode": "custom", "class_colors": {"open": [0, 0, 255]},
+        })
+        self.assertEqual(color, (0, 0, 255))
+
+    def test_class_name_color_takes_precedence_over_numeric_id(self):
+        color = _color_for(self.detection, {
+            "color_mode": "custom",
+            "class_colors": {"person": [0, 0, 255], "0": [0, 255, 0]},
+        })
+        self.assertEqual(color, (0, 0, 255))
+
     def test_custom_mode_uses_auto_for_unmapped_classes(self):
         color = _color_for(self.detection, {
             "color_mode": "custom", "class_colors": {"machine": [0, 0, 255]},

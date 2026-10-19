@@ -36,7 +36,20 @@ def _color_for(det, render_config):
     if mode == "custom":
         colors = cfg.get("class_colors", {})
         if isinstance(colors, dict):
-            color = _normalize_color(colors.get(class_key))
+            # Prefer a configured class name (case-insensitive), then fall back
+            # to the numeric class ID as a string, e.g. "1": [0, 0, 255].
+            class_name = det.get("class_name")
+            color_value = colors.get(str(class_name)) if class_name is not None else None
+            if color_value is None and class_name is not None:
+                lowered_name = str(class_name).lower()
+                color_value = next(
+                    (value for key, value in colors.items()
+                     if str(key).lower() == lowered_name),
+                    None,
+                )
+            if color_value is None and det.get("class") is not None:
+                color_value = colors.get(str(det["class"]))
+            color = _normalize_color(color_value)
             if color is not None:
                 return color
         return _auto_color(model_id, class_key)

@@ -2,44 +2,104 @@
     "cameras": [
         {
             "name": "cam1",
-            "machineCount": 3,
+            "machineCount": 0,
             "roi": {
-                "col1": 492,
-                "row1": 268,
-                "col2": 1834,
-                "row2": 1076
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam2",
-            "machineCount": 4,
+            "machineCount": 0,
             "roi": {
-                "col1": 130,
-                "row1": 304,
-                "col2": 1804,
-                "row2": 1078
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam3",
-            "machineCount": 3,
+            "machineCount": 0,
             "roi": {
-                "col1": 258,
-                "row1": 270,
-                "col2": 1350,
-                "row2": 868
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         },
         {
             "name": "cam4",
-            "machineCount": 4,
+            "machineCount": 0,
             "roi": {
-                "col1": 452,
-                "row1": 290,
-                "col2": 1812,
-                "row2": 874
+                "row1": null,
+                "col1": null,
+                "row2": null,
+                "col2": null
             }
         }
     ],
-    "confidence_threshold": 0.7
+    "confidence_threshold": 0.7,
+    "alarm_image": {
+        "mode": "model",
+        "color_mode": "auto",
+        "show_label": true,
+        "show_confidence": true,
+        "thickness": 2
+    },
+    "models": [
+        {
+            "id": "model_1",
+            "enabled": true,
+            "render": {
+                "mode": "model",
+                "class_colors": {
+                    "normal": [
+                        0,
+                        255,
+                        0
+                    ],
+                    "open": [
+                        0,
+                        0,
+                        255
+                    ]
+                },
+                "show_label": true,
+                "show_confidence": true
+            },
+            "alarm_rules": [
+                {
+                    "id": "machine_missing",
+                    "type": "count_below",
+                    "expected_count_from_camera": true,
+                    "duration_sec": 2,
+                    "cooldown_sec": 5,
+                    "alarm_type": "machine missing",
+                    "message": "can not detect machine"
+                },
+                {
+                    "id": "alarm_open",
+                    "type": "class_detected",
+                    "class_id": 1,
+                    "cooldown_sec": 5,
+                    "alarm_type": "alarm open",
+                    "message": "open detected"
+                }
+            ]
+        },
+        {
+            "id": "model_2",
+            "enabled": true,
+            "render": {
+                "mode": "model",
+                "color_mode": "auto",
+                "show_label": true,
+                "show_confidence": true
+            },
+            "alarm_rules": []
+        }
+    ]
 }

@@ -1,49 +1,14 @@
 {
     "cameras": [
-        {
-            "name": "cam1",
-            "machineCount": 0,
-            "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
-            }
-        },
-        {
-            "name": "cam2",
-            "machineCount": 0,
-            "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
-            }
-        },
-        {
-            "name": "cam3",
-            "machineCount": 0,
-            "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
-            }
-        },
-        {
-            "name": "cam4",
-            "machineCount": 0,
-            "roi": {
-                "row1": null,
-                "col1": null,
-                "row2": null,
-                "col2": null
-            }
-        }
+        {"name": "cam1", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
+        {"name": "cam2", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
+        {"name": "cam3", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}},
+        {"name": "cam4", "machineCount": 0, "roi": {"row1": null, "col1": null, "row2": null, "col2": null}}
     ],
     "confidence_threshold": 0.7,
     "alarm_image": {
         "mode": "both",
+        "color_mode": "auto",
         "show_label": true,
         "show_confidence": true,
         "thickness": 2
@@ -54,6 +19,7 @@
             "enabled": true,
             "render": {
                 "mode": "both",
+                "color_mode": "auto",
                 "show_label": true,
                 "show_confidence": true
             },
@@ -82,6 +48,7 @@
             "enabled": true,
             "render": {
                 "mode": "model",
+                "color_mode": "auto",
                 "show_label": true,
                 "show_confidence": true
             },

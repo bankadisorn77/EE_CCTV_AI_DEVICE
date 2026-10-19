@@ -117,8 +117,8 @@ class BatchPipelineTests(unittest.TestCase):
                 for v in range(1, 11):    # 10 frames arrive while the first batch runs
                     cam.push(v); await asyncio.sleep(0.01)
             await run_for(pipe, 0.5, drive)
-        p1, p2, p3 = self._patches(rec)
-        with p1, p2, p3:
+        patches = self._patches(rec)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             asyncio.run(go())
         seen = [v for b in rec.batches for v in b]
         self.assertLess(len(seen), 10)                # some were dropped on purpose
@@ -145,8 +145,8 @@ class BatchPipelineTests(unittest.TestCase):
                 for v in range(1, 31):
                     pipe.cameras[0].push(v); await asyncio.sleep(0.005)
             await run_for(pipe, 0.3, drive)
-        p1, p2, p3 = self._patches(rec)
-        with p1, p2, p3:
+        patches = self._patches(rec)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             asyncio.run(go())
         stats = pipe.fps_stats["cam1"]
         self.assertGreater(stats["capture_count"], stats["process_count"])

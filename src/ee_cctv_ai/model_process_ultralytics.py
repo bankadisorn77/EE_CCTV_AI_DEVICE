@@ -154,25 +154,38 @@ def cv2_preprocess_fast(img, config_cam):
     return cropped_img, (col1, row1)
 
 
-def build_payload(dets, config_cam):
+def model_class_names(model_name):
+    """Return the class-name map for a loaded model without assuming shared labels."""
+    for info in load_model():
+        if info["name"] == model_name:
+            names = getattr(info["model"], "names", {}) or {}
+            if isinstance(names, dict):
+                return {int(key): str(value) for key, value in names.items()}
+            return {idx: str(value) for idx, value in enumerate(names)}
+    return {}
+
+
+def build_payload(dets, config_cam, class_names=None):
     count = config_cam.get("machineCount", 0) if config_cam else 0
+    class_names = class_names or {}
     detection = []
     for x1, y1, x2, y2, score, cls_id in dets:
-        detection.append({
-            "class": int(cls_id),
+        cls_id = int(cls_id)
+        item = {
+            "class": cls_id,
             "conf": round(float(score), 2),
             "box": (int(x1), int(y1), int(x2), int(y2)),
-        })
+        }
+        if cls_id in class_names:
+            item["class_name"] = class_names[cls_id]
+        detection.append(item)
     return {"detection": detection, "machineCount": count if count is not None else 0}
 
 
-def draw_detections(img, detections):
-    out = img.copy()
-    for det in detections or []:
-        x1, y1, x2, y2 = det["box"]
-        color = (0, 0, 255) if det["class"] == 1 else (0, 255, 0)
-        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
-    return out
+def draw_detections(img, detections, render_config=None):
+    # Preserve the public helper while using the configurable renderer.
+    from src.ee_cctv_ai.alarm_renderer import draw_detections as render
+    return render(img, detections, render_config)
 
 
 # --------------------------------------------------------------------------- #

@@ -2,7 +2,6 @@ import unittest
 
 from src.ee_cctv_ai.alarm_rules import AlarmRuleEngine
 
-
 class AlarmRuleEngineTests(unittest.TestCase):
     def test_class_detected_rules_work_for_arbitrary_model_ids(self):
         engine = AlarmRuleEngine({"models": [
@@ -54,6 +53,28 @@ class AlarmRuleEngineTests(unittest.TestCase):
         self.assertEqual(events[1]["image_mode"], "model")
         self.assertEqual(engine.evaluate("cam1", {"a": one, "b": one}, now=2), [])
 
+    def test_rule_render_overrides_model_and_global_color_settings(self):
+        engine = AlarmRuleEngine({
+            "alarm_image": {"mode": "both", "color_mode": "auto", "thickness": 2},
+            "models": [
+                {"id": "a", "render": {"color_mode": "custom",
+                 "class_colors": {"person": [0, 255, 0]}}, "alarm_rules": [
+                    {"id": "person", "type": "class_detected", "class_name": "person",
+                     "render": {"color_mode": "custom",
+                                "class_colors": {"person": [0, 0, 255]}}}
+                ]},
+                {"id": "b", "render": {"color_mode": "model",
+                 "model_color": [255, 0, 0]}, "alarm_rules": []}
+            ]
+        })
+        payload = {"a": {"detection": [
+            {"class": 0, "class_name": "person", "conf": .9, "box": (0, 0, 1, 1)}
+        ]}}
+        event = engine.evaluate("cam1", payload, now=1)[0]
+        self.assertEqual(event["render"]["models"]["a"]["class_colors"]["person"], [0, 0, 255])
+        self.assertEqual(event["render"]["models"]["a"]["thickness"], 2)
+        self.assertEqual(event["render"]["models"]["b"]["model_color"], [255, 0, 0])
+
     def test_legacy_fallback_preserves_model_1_rules(self):
         engine = AlarmRuleEngine({}, legacy_miss_seconds=2, legacy_cooldown_seconds=5)
         payload = {"model_1": {"detection": [], "machineCount": 1}}
@@ -61,7 +82,6 @@ class AlarmRuleEngineTests(unittest.TestCase):
         events = engine.evaluate("cam1", payload, now=12)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["alarm_type"], "machine missing")
-
 
 if __name__ == "__main__":
     unittest.main()

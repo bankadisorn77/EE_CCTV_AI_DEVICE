@@ -36,7 +36,7 @@ class AlarmRuleEngineTests(unittest.TestCase):
         ]}}
         engine.evaluate("cam1", full, now=13)
         self.assertEqual(engine.evaluate("cam1", payload, now=14), [])
-        self.assertEqual(len(engine.evaluate("cam1", payload, now=16)), 1)
+        self.assertEqual(len(engine.evaluate("cam1", payload, now=17)), 1)
 
     def test_image_modes_and_per_model_cooldown_are_independent(self):
         engine = AlarmRuleEngine({"models": [

@@ -56,14 +56,20 @@ def make_pipeline(n=4, shared=None):
 
 
 class Recorder:
-    """Fake predict_batch_sync that records each batch."""
+    """Fake the current two-stage pipeline without loading Ultralytics/GPU models."""
     def __init__(self, delay=0.0, boxes=None):
         self.batches, self.delay, self.boxes = [], delay, boxes
-    def __call__(self, frames, cfgs, size, conf):
-        self.batches.append([int(f[0, 0, 0]) for f in frames])
-        if self.delay: time.sleep(self.delay)
-        d = [self.boxes if self.boxes is not None else np.zeros((0, 6), np.float32)] * len(frames)
-        return d, {"n": len(frames), "pre_ms": 0, "infer_ms": 0, "post_ms": 0}
+
+    def prepare(self, frames, cfgs, size):
+        return {"frames": frames, "n": len(frames), "timing": {"pre_ms": 0}}
+
+    def infer(self, prepared, conf):
+        frames = prepared["frames"]
+        self.batches.append([int(frame[0, 0, 0]) for frame in frames])
+        if self.delay:
+            time.sleep(self.delay)
+        detections = self.boxes if self.boxes is not None else np.zeros((0, 6), np.float32)
+        return [{"model_1": detections} for _ in frames], {"n": len(frames), "infer_ms": 0}
 
 
 async def _noop(): return None
@@ -81,9 +87,13 @@ async def run_for(pipe, seconds, driver):
 
 class BatchPipelineTests(unittest.TestCase):
     def _patches(self, rec, max_batch=4):
-        return (patch.object(camera_manager.model_process, "predict_batch_sync", rec),
-                patch.object(camera_manager.model_process, "ensure_loaded", _noop),
-                patch.object(camera_manager.model_process, "max_batch", lambda: max_batch))
+        return (
+            patch.object(camera_manager.model_process, "prepare_batch_sync", rec.prepare),
+            patch.object(camera_manager.model_process, "infer_batch_sync", rec.infer),
+            patch.object(camera_manager.model_process, "model_class_names", lambda name: {}),
+            patch.object(camera_manager.model_process, "ensure_loaded", _noop),
+            patch.object(camera_manager.model_process, "max_batch", lambda: max_batch),
+        )
 
     def test_simultaneous_frames_form_one_batch(self):
         pipe, rec = make_pipeline(), Recorder()
@@ -92,8 +102,8 @@ class BatchPipelineTests(unittest.TestCase):
                 for i, cam in enumerate(pipe.cameras):
                     cam.push(i + 1)
             await run_for(pipe, 0.3, drive)
-        p1, p2, p3 = self._patches(rec)
-        with p1, p2, p3:
+        patches = self._patches(rec)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             asyncio.run(go())
         flat = sorted(v for b in rec.batches for v in b)
         self.assertEqual(flat, [1, 2, 3, 4])          # every camera processed exactly once
@@ -122,8 +132,8 @@ class BatchPipelineTests(unittest.TestCase):
                 for i, cam in enumerate(pipe.cameras):
                     cam.push(i + 1)
             await run_for(pipe, 0.4, drive)
-        p1, p2, p3 = self._patches(rec, max_batch=1)
-        with p1, p2, p3:
+        patches = self._patches(rec, max_batch=1)
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             asyncio.run(go())
         self.assertTrue(all(len(b) == 1 for b in rec.batches))
         self.assertEqual(sorted(v for b in rec.batches for v in b), [1, 2, 3, 4])
@@ -183,6 +193,7 @@ class AcquisitionIntakeTests(unittest.TestCase):
     def test_on_frame_callback_fires_from_reader_loop(self):
         calls = []
         cam = Acquisition("rtsp://x", key="camX", on_frame=calls.append)
+        cam.min_interval = 0.0
 
         class Cap:
             def __init__(self): self.n = 0

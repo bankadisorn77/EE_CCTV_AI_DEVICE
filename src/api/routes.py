@@ -30,7 +30,6 @@ def create_router(
 
     @router.get("/fps")
     async def get_fps(cam: Optional[str] = Query(None, description="Camera key เช่น cam1, cam2")):
-        """Endpoint สำหรับดึงค่า FPS สรุปของระบบ หรือระบุเฉพาะกล้อง"""
         pipeline = pipeline_manager.pipeline
         if pipeline is None or not pipeline_manager.running:
             return {

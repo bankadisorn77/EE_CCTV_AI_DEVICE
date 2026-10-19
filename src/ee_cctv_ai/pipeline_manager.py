@@ -18,7 +18,6 @@ class PipelineManager:
         return self._task is not None and not self._task.done()
 
     async def start(self):
-        """Start once; return False if a pipeline task is already active."""
         async with self._lock:
             if self.running:
                 return False
@@ -27,7 +26,6 @@ class PipelineManager:
             return True
 
     async def stop(self):
-        """Cancel and await the pipeline, allowing its finally block to clean up."""
         async with self._lock:
             task = self._task
             if task is not None and not task.done():

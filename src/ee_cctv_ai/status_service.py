@@ -1,4 +1,3 @@
-"""Device health/statistics helpers sent through Socket.IO."""
 import psutil
 
 

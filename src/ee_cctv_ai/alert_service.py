@@ -1,9 +1,3 @@
-"""Bounded asynchronous alarm delivery.
-
-Detection workers enqueue alarms and immediately continue processing. The service
-uses one HTTP client and drops the oldest queued item when overloaded, preventing
-unbounded RAM growth on a slow/offline webserver.
-"""
 import asyncio
 import httpx
 

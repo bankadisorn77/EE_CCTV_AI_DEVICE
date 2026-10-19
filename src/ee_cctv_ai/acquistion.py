@@ -1,4 +1,3 @@
-"""Per-camera frame acquisition with isolated reconnect handling."""
 import os
 import platform
 import threading
@@ -10,9 +9,7 @@ class Acquisition:
     def __init__(self, url, key="cam1", on_stream_end=None, on_frame=None):
         self.url = url
         self.name = key
-        self.on_stream_end = on_stream_end  # compatibility only; no pipeline-wide shutdown
-        # Called from the reader thread with the camera name after every new frame.
-        # Must be cheap and thread-safe; the pipeline uses it to wake the inference loop.
+        self.on_stream_end = on_stream_end
         self.on_frame = on_frame
         self.cap = None
         self._image = None
@@ -24,25 +21,20 @@ class Acquisition:
         self.connected = False
         self._reconnect_count = 0
 
+        self.target_fps = max(1, int(float(os.getenv("EE_CCTV_TARGET_FPS", "10"))))
+        self.min_interval = 1.0 / float(self.target_fps)
+
     @property
     def image(self):
         with self._lock:
             return None if self._image is None else self._image.copy()
 
     def latest_frame(self):
-        """Return an image copy and its matching frame id atomically."""
         with self._lock:
             image = None if self._image is None else self._image.copy()
             return image, self.frame_id
 
     def take_new_frame(self, last_id):
-        """Return (frame, frame_id) only if a frame newer than last_id exists.
-
-        No copy is made: cap.read() allocates a fresh array per frame and the reader
-        only ever REPLACES self._image, never modifies it in place. The caller owns
-        the returned array for reading; it must copy before drawing on it.
-        Returns (None, frame_id) when nothing new is available.
-        """
         with self._lock:
             if self._image is None or self.frame_id == last_id:
                 return None, self.frame_id
@@ -51,45 +43,19 @@ class Acquisition:
     def initial(self):
         if self.cap is not None:
             return
-        is_gstreamer = False
 
         if isinstance(self.url, str) and self.url.startswith("rtsp://"):
-            # กำหนด protocols=tcp latency=200 เพื่อความเสถียร
             pipeline = (
                 f"rtspsrc location={self.url} protocols=tcp latency=200 ! "
+                "application/x-rtp, media=video, encoding-name=H264 ! "
                 "rtph264depay ! h264parse ! nvv4l2decoder ! "
                 "nvvidconv ! video/x-raw, format=BGRx ! "
                 "videoconvert ! video/x-raw, format=BGR ! "
                 "appsink drop=true sync=false max-buffers=1"
             )
             cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-            is_gstreamer = True
-
-        elif isinstance(self.url, str) and self.url.endswith(".mp4"):
-            abs_path = os.path.abspath(self.url)
-            cap = None
-            if platform.system() == "Linux" and platform.machine() == "aarch64":
-                pipeline = (
-                    f'filesrc location="{abs_path}" ! '
-                    "qtdemux ! h264parse ! nvv4l2decoder ! "
-                    "nvvidconv ! video/x-raw, format=BGRx ! "
-                    "videoconvert ! video/x-raw, format=BGR ! "
-                    "appsink drop=true sync=false max-buffers=1"
-                )
-                cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-                is_gstreamer = True
-
-            if cap is None or not cap.isOpened():
-                if cap is not None:
-                    cap.release()
-                cap = cv2.VideoCapture(abs_path)
-                is_gstreamer = False
         else:
             cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-            is_gstreamer = False
-
-        # เรียก set buffer size เฉพาะตอนที่ไม่ใช่ GStreamer เท่านั้น
-        if not is_gstreamer:
             try:
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
@@ -109,9 +75,6 @@ class Acquisition:
         self.t.start()
 
     def stop(self):
-        # The reader thread must be the only thread that calls read()/release() on
-        # this VideoCapture. Releasing it concurrently with cap.read() can trigger
-        # FFmpeg/libavcodec assertions such as "fctx->async_lock failed".
         self.stop_process = True
         self.connected = False
         if self.t is not None and self.t.is_alive() and threading.current_thread() is not self.t:
@@ -123,12 +86,13 @@ class Acquisition:
                 )
 
     def _update(self):
+        last_accept_time = 0.0
         while not self.stop_process:
             if self.cap is None:
                 try:
                     self.initial()
                     self._reconnect_count = 0
-                    print(f"[{self.name}] Camera connected")
+                    print(f"[{self.name}] Camera connected (target_fps={self.target_fps})")
                 except Exception as exc:
                     self.connected = False
                     self._reconnect_count += 1
@@ -136,14 +100,17 @@ class Acquisition:
                     print(f"[{self.name}] Connect failed ({self._reconnect_count}); retrying in {delay:.1f}s: {exc}")
                     self._wait_or_stop(delay)
                     continue
+
             cap = self.cap
             if cap is None:
                 continue
+
             try:
                 ret, frame = cap.read()
             except Exception as exc:
                 print(f"[{self.name}] Frame read failed: {exc}")
                 ret, frame = False, None
+
             if not ret or frame is None:
                 self.connected = False
                 try:
@@ -154,17 +121,25 @@ class Acquisition:
                     self.cap = None
                 self._wait_or_stop(0.5)
                 continue
+
+            now = time.time()
+            if (now - last_accept_time) < self.min_interval:
+                continue
+            last_accept_time = now
+
             with self._lock:
                 self._image = frame
                 self.frame_id += 1
-                self.last_frame_at = time.time()
+                self.last_frame_at = now
             self.connected = True
+
             callback = self.on_frame
             if callback is not None:
                 try:
                     callback(self.name)
                 except Exception as exc:
                     print(f"[{self.name}] on_frame callback error: {exc}")
+
         cap = self.cap
         self.cap = None
         self.connected = False

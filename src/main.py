@@ -16,10 +16,12 @@ if str(PROJECT_ROOT) not in sys.path:
 DEVICE_CONFIG_PATH = PROJECT_ROOT / "config" / "device.json"
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
 
+DEFAULT_CAMERA_COUNT = int(os.getenv("EE_CCTV_NUM_CAMERAS", "8"))
+
 
 def load_device_config():
     defaults = {
-        "rstp_url": ["", "", "", ""],
+        "rstp_url": ["" for _ in range(DEFAULT_CAMERA_COUNT)],
         "webserver_url": "localhost",
         "webserver_port": 8000,
         "ip": "",
@@ -37,7 +39,7 @@ def load_device_config():
 
 device_config = load_device_config()
 
-from src.camera_manager import CCTV_AI_Ultralytics as CCTV_AI 
+from src.camera_manager import CCTV_AI
 from src.shere_data import data
 from src.ee_cctv_ai.frame_capture import init_cctv_ai_frame
 from src.ee_cctv_ai.pipeline_manager import PipelineManager
@@ -45,15 +47,15 @@ from src.ee_cctv_ai.device_service import register_device
 from src.ee_cctv_ai.getip import get_lan_network_info
 from src.ee_cctv_ai.socket_service import SocketStatusService
 
+# set rtsp
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-
 
 
 # -----------------------------Global variables----------------------------------------------
 sio = socketio.AsyncClient()
 
 API_KEY = device_config.get("apiKey")
-rtsp_urls = device_config.get("rstp_url", ["", "", "", ""])
+rtsp_urls = device_config.get("rstp_url", ["" for _ in range(DEFAULT_CAMERA_COUNT)])
 webserver_host = device_config.get("webserver_url", "localhost")
 webserver_port = int(device_config.get("webserver_port", 8000))
 
@@ -64,11 +66,13 @@ register_task = None
 pipeline_manager = PipelineManager(CCTV_AI, rtsp_urls, shared_data, lambda: API_KEY, nodeJS_URL)
 socket_service = SocketStatusService(sio, nodeJS_URL, shared_data, lambda: API_KEY)
 
+
 def set_api_key(value):
     global API_KEY
     API_KEY = value
 
-#  -----------------------------FastAPI app and lifespan----------------------------------------------
+
+# -----------------------------FastAPI app and lifespan----------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global register_task
@@ -99,7 +103,6 @@ async def lifespan(app: FastAPI):
         if background_tasks:
             await asyncio.gather(*background_tasks, return_exceptions=True)
         await sio.disconnect()
-   
 
 
 from src.api.routes import create_router
@@ -117,6 +120,6 @@ app.include_router(
     )
 )
 
-# Socket.IO service is defined below after runtime dependencies.
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=5000)

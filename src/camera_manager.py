@@ -27,7 +27,7 @@ except Exception:  # pragma: no cover
     TurboJPEG = None
 
 
-class CCTV_AI_Ultralytics:
+class CCTV_AI:
 
     def __init__(self, rtsp_urls, shared_data, API_KEY, nodeJS_URL):
         self.stop_process = False
@@ -43,11 +43,14 @@ class CCTV_AI_Ultralytics:
         self.cam_names = names
         self.miss_since = {n: None for n in names}
         self.alarm_cooldown = {n: 0 for n in names}
-        # "machine missing" must persist this long (was 25 inferred frames, i.e. it
-        # depended on inference FPS). Override with EE_CCTV_MISS_SECONDS.
-        self.MISS_SECONDS = float(os.getenv("EE_CCTV_MISS_SECONDS", "2.0"))
+        self.MISS_SECONDS = float(os.getenv("EE_CCTV_MISS_SECONDS", 2))
         self.COOLDOWN_SEC = 5
         self.start_time = None
+
+
+        self.target_fps = max(1.0, float(os.getenv("EE_CCTV_TARGET_FPS", 10)))
+        self.min_frame_interval = 1.0 / self.target_fps
+        self._last_collect_time = {n: 0.0 for n in names}
 
         self.fps_stats = {
             n: {
@@ -61,23 +64,23 @@ class CCTV_AI_Ultralytics:
             for n in names
         }
 
-        # Newest not-yet-processed frame per camera (older ones are overwritten = dropped).
+
         self._pending = {}
         self._last_ids = {n: -1 for n in names}
-        self._rr = 0  # round-robin start so no camera starves when batch < #cameras
+        self._rr = 0  
         self._loop = None
         self.frame_event = None
+        self._prep_queue = None
         self._result_queue = None
         self._prof = self._new_prof()
 
         self.alert_service = AlertService(self.nodeJS_URL, self.API_KEY)
 
-        # Readers reconnect independently; one camera must not abort pipeline startup.
+    
         self.cameras = [Acquisition(rtsp_urls[i], key=names[i]) for i in range(len(rtsp_urls))]
 
         self.jpeg = None
         if TurboJPEG is not None:
-            # explicit ARM64/Jetson path avoids the slow fallback lookup
             try:
                 self.jpeg = TurboJPEG('/usr/lib/aarch64-linux-gnu/libturbojpeg.so.0')
             except Exception:
@@ -88,7 +91,7 @@ class CCTV_AI_Ultralytics:
 
         atexit.register(self.cleanup)
 
-    # ------------------------------------------------------------------ config
+    # ------------------------------------------ config -------------------------------------------------------
     def read_config(self):
         try:
             config_data = load_config(PROJECT_ROOT / "config" / "config.json")
@@ -100,10 +103,11 @@ class CCTV_AI_Ultralytics:
             self.shared_data.set_config([{"name": f"cam{i+1}", "roi": None} for i in range(len(self.urls))])
             self.shared_data.set_confidence_threshold(0.5)
 
-    # ----------------------------------------------------------- frame intake
+    # ---------------------------------------------- frame intake -------------------------------------------------------
     def _on_camera_frame(self, cam_key):
-        """Runs in the camera's reader thread for every decoded frame."""
-        self.update_capture_fps(cam_key)  # counts EVERY decoded frame, not just processed ones
+        self.update_capture_fps(cam_key)  
+        #if (time.time() - self._last_collect_time.get(cam_key, 0.0)) < self.min_frame_interval:
+        #    return
         loop = self._loop
         event = self.frame_event
         if loop is None or event is None or event.is_set():
@@ -114,11 +118,15 @@ class CCTV_AI_Ultralytics:
             pass
 
     def _collect_new_frames(self):
+        now = time.time()
         for cam in self.cameras:
+            #if (now - self._last_collect_time[cam.name]) < self.min_frame_interval:
+            #    continue
             frame, fid = cam.take_new_frame(self._last_ids[cam.name])
             if frame is not None:
                 self._last_ids[cam.name] = fid
                 self._pending[cam.name] = frame  # overwrite -> stale frame dropped
+                self._last_collect_time[cam.name] = now
 
     def _take_batch(self):
         limit = max(1, model_process.max_batch())
@@ -134,13 +142,17 @@ class CCTV_AI_Ultralytics:
             self._rr = (names.index(items[-1]["cam_key"]) + 1) % len(names)
         return items
 
-    # -------------------------------------------------------------- inference
-    async def _inference_loop(self):
+    # -------------------------------------------------------------- inference -------------------------------------------------------
+    async def _prepare_loop(self):
         loop = self._loop
-        print("Started batched inference loop")
+        print("Started batched inference pipeline")
         while not self.stop_process:
-            await self.frame_event.wait()
-            self.frame_event.clear()
+            try:
+                await asyncio.wait_for(self.frame_event.wait(), timeout=self.min_frame_interval)
+                self.frame_event.clear()
+            except asyncio.TimeoutError:
+                pass
+
             self._collect_new_frames()
             items = self._take_batch()
             if not items:
@@ -150,30 +162,61 @@ class CCTV_AI_Ultralytics:
 
             try:
                 cfgs = [self.shared_data.get_config_by_cam(it["cam_key"]) for it in items]
-                conf = self.shared_data.get_confidence_threshold()
-                dets, timing = await loop.run_in_executor(
-                    model_process.gpu_executor,
-                    model_process.predict_batch_sync,
+                prepared = await loop.run_in_executor(
+                    model_process.prep_executor,
+                    model_process.prepare_batch_sync,
                     [it["frame"] for it in items],
                     cfgs,
                     model_process.INPUT_SIZE,
+                )
+                await self._prep_queue.put((items, cfgs, prepared))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"Prepare error: {e!r}")
+                self.shared_data.set_LIFE("error")
+                await asyncio.sleep(0.1)
+
+    async def _infer_loop(self):
+        loop = self._loop
+        while not self.stop_process:
+            items, cfgs, prepared = await self._prep_queue.get()
+            try:
+                conf = self.shared_data.get_confidence_threshold()
+                dets, timing = await loop.run_in_executor(
+                    model_process.gpu_executor,
+                    model_process.infer_batch_sync,
+                    prepared,
                     conf,
                 )
-                await self._result_queue.put((items, cfgs, dets, timing))
+                merged = dict(prepared.get("timing", {}))
+                merged.update(timing)
+                await self._result_queue.put((items, cfgs, dets, merged))
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 print(f"Inference error: {e!r}")
                 self.shared_data.set_LIFE("error")
                 await asyncio.sleep(0.1)
+            finally:
+                self._prep_queue.task_done()
 
     async def _result_loop(self):
         while not self.stop_process:
-            items, cfgs, dets, timing = await self._result_queue.get()
+            items, cfgs, batch_dets, timing = await self._result_queue.get()
             try:
-                for it, cfg, d in zip(items, cfgs, dets):
-                    payload = model_process.build_payload(d, cfg)
-                    await self.logic(it["frame"], it["cam_key"], payload)
+                for it, cfg, cam_models_det in zip(items, cfgs, batch_dets):
+                    # cam_models_det = {"model_1": dets_array_1, "model_2": dets_array_2, ...}
+                    if isinstance(cam_models_det, dict):
+                        models_payload = {
+                            m_name: model_process.build_payload(d, cfg)
+                            for m_name, d in cam_models_det.items()
+                        }
+                    else:
+                        # Fallback กรณีส่งกลับมาเป็น array เดี่ยว
+                        models_payload = {"model_1": model_process.build_payload(cam_models_det, cfg)}
+
+                    await self.logic(it["frame"], it["cam_key"], models_payload)
                     self.update_process_fps(it["cam_key"])
                 self._profile(timing)
             except asyncio.CancelledError:
@@ -183,33 +226,34 @@ class CCTV_AI_Ultralytics:
             finally:
                 self._result_queue.task_done()
 
-    # -------------------------------------------------------------- profiling
+    # --------------------------------- profiling------------------------------------
     @staticmethod
     def _new_prof():
-        return {"t": time.time(), "batches": 0, "frames": 0, "pre": 0.0, "infer": 0.0, "post": 0.0, "speed": None}
+        return {"t": time.time(), "batches": 0, "frames": 0, "pre": 0.0, "infer": 0.0,
+                "shape": None, "path": None, "speed": None}
 
     def _profile(self, timing):
         if not model_process.PROFILE:
             return
         p = self._prof
         p["batches"] += 1
-        p["frames"] += timing["n"]
-        p["pre"] += timing["pre_ms"]
-        p["infer"] += timing["infer_ms"]
-        p["post"] += timing["post_ms"]
+        p["frames"] += timing.get("n", 0)
+        p["pre"] += timing.get("pre_ms", 0.0)
+        p["infer"] += timing.get("infer_ms", 0.0)
+        p["shape"] = timing.get("frame_shape", p["shape"])
+        p["path"] = timing.get("path", p["path"])
         p["speed"] = timing.get("speed", p["speed"])
-        p["shape"] = timing.get("frame_shape")
         now = time.time()
         if now - p["t"] >= 5.0 and p["batches"]:
             b = p["batches"]
             print(
                 f"[Profile] batches/s={b/(now-p['t']):.1f} avg_batch={p['frames']/b:.2f} "
-                f"pre={p['pre']/b:.1f}ms infer={p['infer']/b:.1f}ms post={p['post']/b:.1f}ms "
-                f"frame_hw={p.get('shape')} ultralytics_speed={p['speed']}"
+                f"pre={p['pre']/b:.1f}ms (stage A) infer={p['infer']/b:.1f}ms (stage B) "
+                f"path={p['path']} frame_hw={p['shape']} ultralytics_speed={p['speed']}"
             )
             self._prof = self._new_prof()
 
-    # -------------------------------------------------------------------- FPS
+    # ------------------------------ FPS ------------------------------------------
     def update_capture_fps(self, cam_key):
         stats = self.fps_stats[cam_key]
         now = time.time()
@@ -237,23 +281,31 @@ class CCTV_AI_Ultralytics:
             return self.fps_stats.get(cam_key, {})
         return self.fps_stats
 
-    # -------------------------------------------------------------------- run
+    # ------------------------------ run ---------------------------
     async def run(self):
         self.start_time = time.time()
         self._loop = asyncio.get_running_loop()
         self.frame_event = asyncio.Event()
-        self._result_queue = asyncio.Queue(maxsize=2)  # back-pressure: GPU runs at most 2 ahead
-        print("CCTV_AI System Running (Ultralytics batched mode)...")
+        self._prep_queue = asyncio.Queue(maxsize=1)
+        self._result_queue = asyncio.Queue(maxsize=2)
+
+        print("Waiting for AI Models to load...")
+        await model_process.ensure_loaded()
+        print("All models loaded successfully!")
+
+        print(
+            f"CCTV_AI System Running (cameras={len(self.cameras)}, "
+            f"models={len(model_process.MODEL_PATHS)})..."
+        )
         await self.alert_service.start()
 
-        # Start readers first so RTSP connects while the engine loads / warms up.
         for cam in self.cameras:
             cam.on_frame = self._on_camera_frame
             cam.start()
         try:
-            await model_process.ensure_loaded()
             self._tasks = [
-                asyncio.create_task(self._inference_loop(), name="inference-loop"),
+                asyncio.create_task(self._prepare_loop(), name="prepare-loop"),
+                asyncio.create_task(self._infer_loop(), name="infer-loop"),
                 asyncio.create_task(self._result_loop(), name="result-loop"),
             ]
             await asyncio.gather(*self._tasks)
@@ -261,7 +313,7 @@ class CCTV_AI_Ultralytics:
             self.cleanup()
             await self.alert_service.stop()
 
-    # ----------------------------------------------------------------- alarms
+    # --------------------------------- alarms ---------------------------------
     def _render_alarm_image(self, image, detections):
         """Draw boxes on a COPY (frames are shared with the camera) and JPEG-encode."""
         return self._encode_image(model_process.draw_detections(image, detections))
@@ -288,13 +340,32 @@ class CCTV_AI_Ultralytics:
         await self.alert_service.enqueue(payload)
         return payload
 
-    async def logic(self, image, cam_id, cam_data):
+    async def logic(self, image, cam_id, models_payload):
+        """
+        models_payload มีโครงสร้างเป็น dict ของทั้ง 1-4 โมเดล:
+        {
+            "model_1": {"detection": [...], "machineCount": int},
+            "model_2": {"detection": [...], "machineCount": int},
+            "model_3": {"detection": [...], "machineCount": int},
+            "model_4": {"detection": [...], "machineCount": int},
+        }
+        """
         try:
-            cam_data = cam_data if cam_data is not None else {"detection": [], "machineCount": 0}
-            now = time.time()
-            detections = cam_data["detection"]
+            if not models_payload:
+                return
 
-            if len(detections) < cam_data["machineCount"]:
+            # ดึงผลลัพธ์ของแต่ละโมเดลออกมาเตรียมไว้ใช้งานต่อ
+            m1_data = models_payload.get("model_1", {"detection": [], "machineCount": 0})
+            m2_data = models_payload.get("model_2", {"detection": [], "machineCount": 0})
+            m3_data = models_payload.get("model_3", {"detection": [], "machineCount": 0})
+            m4_data = models_payload.get("model_4", {"detection": [], "machineCount": 0})
+
+            # ลอจิกเดิม (ทำงานกับ model_1 เป็นค่าเริ่มต้น สามารถปรับแก้เงื่อนไขผสม m1-m4 ต่อได้เลย)
+            now = time.time()
+            detections = m1_data["detection"]
+            machine_count = m1_data["machineCount"]
+
+            if len(detections) < machine_count:
                 if self.miss_since[cam_id] is None:
                     self.miss_since[cam_id] = now
                 if now - self.miss_since[cam_id] >= self.MISS_SECONDS:
@@ -325,7 +396,7 @@ class CCTV_AI_Ultralytics:
         success, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
         return base64.b64encode(buffer).decode('utf-8') if success else ""
 
-    # ---------------------------------------------------------------- cleanup
+    # ------------------------------ cleanup ------------------------------------------
     def cleanup(self):
         if self._cleanup_done:
             return

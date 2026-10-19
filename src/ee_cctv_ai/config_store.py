@@ -1,4 +1,3 @@
-"""Centralized, atomic JSON configuration I/O for the edge device."""
 import json
 import os
 import tempfile
@@ -26,7 +25,6 @@ def load_config(path=DEFAULT_CONFIG_PATH):
 
 
 def save_config(config, path=DEFAULT_CONFIG_PATH):
-    """Atomically replace the config file to avoid partial JSON on power loss."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path = None

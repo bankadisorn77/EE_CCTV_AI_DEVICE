@@ -115,6 +115,12 @@ class AlarmRuleEngine:
                 mode = image_cfg.get("mode", "combined")
                 if mode not in {"combined", "model", "both"}:
                     mode = "combined"
+                render_config = dict(image_cfg)
+                render_config["models"] = {
+                    configured_id: item.get("render", {})
+                    for configured_id, item in configured.items()
+                    if isinstance(item.get("render", {}), dict)
+                }
                 events.append({
                     "camera_id": cam_id,
                     "model_id": model_id,
@@ -127,6 +133,6 @@ class AlarmRuleEngine:
                     ],
                     "model_detections": [dict(det, model_id=model_id) for det in selected],
                     "image_mode": mode,
-                    "render": image_cfg,
+                    "render": render_config,
                 })
         return events

@@ -58,6 +58,12 @@ class AlarmRuleEngine:
             }
         }
 
+    @staticmethod
+    def _as_render_dict(value):
+        if isinstance(value, str):
+            return {"mode": value}
+        return value if isinstance(value, dict) else {}
+
     def evaluate(self, cam_id, models_payload, now=None):
         now = time.time() if now is None else float(now)
         if not models_payload:
@@ -68,6 +74,12 @@ class AlarmRuleEngine:
             for model_id, data in models_payload.items()
             for det in data.get("detection", [])
         ]
+        global_render = self._as_render_dict(self.config.get("alarm_image", {}))
+        model_render_configs = {}
+        for configured_id, item in configured.items():
+            model_render = self._as_render_dict(item.get("render", {}))
+            model_render_configs[configured_id] = {**global_render, **model_render}
+
         events = []
         for model_id, model_cfg in configured.items():
             data = models_payload.get(model_id)
@@ -77,7 +89,7 @@ class AlarmRuleEngine:
             for index, rule in enumerate(model_cfg.get("alarm_rules", [])):
                 if not isinstance(rule, dict) or rule.get("enabled", True) is False:
                     continue
-                rule_id = str(rule.get("id") or f"rule_{index + 1}")
+                rule_id = str(rule.get("id") or "rule_{}".format(index + 1))
                 state_key = (cam_id, model_id, rule_id)
                 kind = rule.get("type")
                 matched = [d for d in detections if self._class_matches(d, rule)]
@@ -109,18 +121,18 @@ class AlarmRuleEngine:
 
                 selected = matched if kind == "class_detected" else detections
                 confidence = max((float(d.get("conf", 0.0)) for d in matched), default=0.0)
-                image_cfg = rule.get("render", model_cfg.get("render", self.config.get("alarm_image", {})))
-                if isinstance(image_cfg, str):
-                    image_cfg = {"mode": image_cfg}
-                mode = image_cfg.get("mode", "combined")
+                # Merge defaults -> model settings -> rule settings, so rule-level
+                # colors/styles override only the triggering model for this event.
+                rule_render = self._as_render_dict(rule.get("render", {}))
+                effective_render = {**model_render_configs.get(model_id, {}), **rule_render}
+                mode = effective_render.get("mode", "combined")
                 if mode not in {"combined", "model", "both"}:
                     mode = "combined"
-                render_config = dict(image_cfg)
-                render_config["models"] = {
-                    configured_id: item.get("render", {})
-                    for configured_id, item in configured.items()
-                    if isinstance(item.get("render", {}), dict)
-                }
+                effective_render["mode"] = mode
+                render_config = dict(effective_render)
+                render_config["models"] = dict(model_render_configs)
+                render_config["models"][model_id] = effective_render
+
                 events.append({
                     "camera_id": cam_id,
                     "model_id": model_id,
